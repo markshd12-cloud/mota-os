@@ -3,6 +3,11 @@ import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { logActivity }       from "@/lib/activity-logger"
 import { getAllowedCompanyIds } from "@/lib/company-scope"
+import { fetchWithTimeout }     from "@/lib/security"
+import { parseBody, rocketchatSendSchema } from "@/lib/validators"
+import { rateLimit }            from "@/lib/rate-limit"
+
+const SEND_TIMEOUT_MS = 10_000
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -117,10 +122,11 @@ async function sendWebhook(dest: RCDest, message: string, channelOverride?: stri
   }
   if (dest.avatar) body.avatar = dest.avatar
 
-  const res = await fetch(dest.webhook_url, {
+  const res = await fetchWithTimeout(dest.webhook_url, {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
     body:    JSON.stringify(body),
+    timeoutMs: SEND_TIMEOUT_MS,
   })
 
   if (!res.ok) {
@@ -140,7 +146,7 @@ async function sendRest(dest: RCDest, message: string, channelOverride?: string)
   const raw = channelOverride?.trim() || dest.channel
   const channel = raw.startsWith("#") || raw.startsWith("@") ? raw : `#${raw}`
 
-  const res = await fetch(`${dest.base_url.replace(/\/$/, "")}/api/v1/chat.postMessage`, {
+  const res = await fetchWithTimeout(`${dest.base_url.replace(/\/$/, "")}/api/v1/chat.postMessage`, {
     method:  "POST",
     headers: {
       "Content-Type": "application/json",
@@ -148,6 +154,7 @@ async function sendRest(dest: RCDest, message: string, channelOverride?: string)
       "X-User-Id":    dest.user_id,
     },
     body: JSON.stringify({ channel, text: message.trim() }),
+    timeoutMs: SEND_TIMEOUT_MS,
   })
 
   const rcJson = await res.json() as { success?: boolean; error?: string }
@@ -162,21 +169,19 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
 
-  const body = await req.json() as {
-    message:           string
-    channel?:          string
-    destination_id?:   string
-    destination_type?: string
-    source_type?:      string
-    source_id?:        string
-    company_id?:       string
-    session_id?:       string
+  // Rate limit por user — 30 mensagens/min (anti-spam).
+  const rl = rateLimit(`rocketchat-send:${user.id}`, { limit: 30, windowMs: 60_000 })
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "Muitas mensagens enviadas. Aguarde alguns segundos." },
+      { status: 429, headers: { "Retry-After": String(rl.resetIn) } },
+    )
   }
 
+  const parsed = await parseBody(req, rocketchatSendSchema)
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+  const body = parsed.data
   const { message } = body
-  if (!message?.trim()) {
-    return NextResponse.json({ error: "message é obrigatório" }, { status: 400 })
-  }
 
   const admin = createAdminClient()
 

@@ -84,20 +84,23 @@ export function useSessions(companyId?: string) {
 
     setLoading(true)
     const supabase = createClient()
+    const SESSION_COLS = "id, title, company_id, last_message_at, created_at, pinned, archived, message_count, deleted_at, agent:agents(short_name, color)"
+
     const { data, error } = await supabase
       .from("sessions")
-      .select("*, agent:agents(short_name, color)")
+      .select(SESSION_COLS)
       .eq("company_id", companyId)
       .is("deleted_at", null)
       .order("last_message_at", { ascending: false })
       .limit(200)
 
     if (error) {
-      // deleted_at ainda não existe no banco (migration 15/16 não aplicada)
-      console.warn("[useSessions] Fallback query (deleted_at ausente?):", error.message)
+      // deleted_at ainda não existe no banco (migration 15/16 não aplicada).
+      // Sem console.warn no client — error.message do Supabase pode vazar
+      // nomes de coluna ou constraints. O fallback abaixo trata o caso.
       const { data: fallback } = await supabase
         .from("sessions")
-        .select("*, agent:agents(short_name, color)")
+        .select(SESSION_COLS)
         .eq("company_id", companyId)
         .eq("archived", false)
         .order("last_message_at", { ascending: false })

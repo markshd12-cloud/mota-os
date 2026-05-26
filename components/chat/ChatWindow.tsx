@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { MessageSquare, Sparkles, PanelRightOpen, PanelRightClose, Share2 } from "lucide-react"
+import { MessageSquare, Sparkles, PanelRightOpen, PanelRightClose, Share2, LogIn, Copy, LogOut } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
@@ -38,6 +38,25 @@ interface ChatWindowProps {
   agents?:          Agent[]
 }
 
+type DeviceStartResponse = {
+  device_code: string
+  user_code: string
+  verification_uri: string
+  verification_uri_complete?: string
+  expires_in: number
+  interval: number
+}
+
+type DevicePollResponse = {
+  status?: "pending" | "slow_down" | "expired" | "denied" | "authorized" | "error"
+  error?: string
+  error_description?: string
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export function ChatWindow({
   sessionId,
   sessionTitle,
@@ -58,6 +77,37 @@ export function ChatWindow({
 
   const [rocketModalOpen,    setRocketModalOpen]    = useState(false)
   const [rocketInitialMsg,   setRocketInitialMsg]   = useState("")
+  const [gptAuthReady,    setGptAuthReady]    = useState(false)
+  const [geminiAuthReady, setGeminiAuthReady] = useState(false)
+  const [deviceAuth, setDeviceAuth] = useState<DeviceStartResponse | null>(null)
+  const [deviceLoading, setDeviceLoading] = useState(false)
+  const [deviceError, setDeviceError] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null
+    const params = new URLSearchParams(window.location.search)
+    const err = params.get("gpt_error")
+    if (err) {
+      const clean = new URL(window.location.href)
+      clean.searchParams.delete("gpt_error")
+      window.history.replaceState(null, "", clean.toString())
+      return decodeURIComponent(err)
+    }
+    return null
+  })
+  const [geminiError, setGeminiError] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null
+    const params = new URLSearchParams(window.location.search)
+    const err = params.get("gemini_error")
+    if (err) {
+      const clean = new URL(window.location.href)
+      clean.searchParams.delete("gemini_error")
+      window.history.replaceState(null, "", clean.toString())
+      return decodeURIComponent(err)
+    }
+    return null
+  })
+  const [copyFeedback, setCopyFeedback] = useState<"idle" | "copied">("idle")
+  const geminiLoginHref = "/api/auth/google/login?returnTo=/chat"
+  const geminiReconnectHref = "/api/auth/google/logout?returnTo=/api/auth/google/login%3FreturnTo%3D%2Fchat"
 
   function handleSendToRocket(text: string) {
     setRocketInitialMsg(text)
@@ -68,6 +118,156 @@ export function ChatWindow({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, isTyping])
+
+  useEffect(() => {
+    let ignore = false
+
+    async function checkAuth() {
+      try {
+        const [gptRes, geminiRes] = await Promise.all([
+          fetch("/api/auth/codex-status",   { cache: "no-store" }),
+          fetch("/api/auth/gemini-status",  { cache: "no-store" }),
+        ])
+        if (ignore) return
+        if (gptRes.ok) {
+          const d = await gptRes.json() as { authenticated?: boolean }
+          if (!ignore) setGptAuthReady(Boolean(d.authenticated))
+        }
+        if (geminiRes.ok) {
+          const d = await geminiRes.json() as { authenticated?: boolean }
+          if (!ignore) setGeminiAuthReady(Boolean(d.authenticated))
+        }
+      } catch {
+        // ignore network errors — buttons stay visible
+      }
+    }
+
+    void checkAuth()
+    return () => { ignore = true }
+  }, [])
+
+  useEffect(() => {
+    if (copyFeedback !== "copied") return
+    const timeout = window.setTimeout(() => setCopyFeedback("idle"), 1200)
+    return () => window.clearTimeout(timeout)
+  }, [copyFeedback])
+
+  useEffect(() => {
+    if (!deviceAuth) return
+
+    const deviceCode = deviceAuth.device_code
+    const expiresIn  = deviceAuth.expires_in
+    const interval   = deviceAuth.interval
+
+    let cancelled = false
+    const startedAt = Date.now()
+    const ttlMs = Math.max(60, expiresIn) * 1000
+    let delayMs = Math.max(3, interval) * 1000
+
+    async function pollAuth() {
+      while (!cancelled && Date.now() - startedAt < ttlMs) {
+        await sleep(delayMs)
+        if (cancelled) return
+
+        try {
+          const res = await fetch("/api/auth/device/poll", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ device_code: deviceCode }),
+          })
+          const data = await res.json() as DevicePollResponse
+
+          if (data.status === "authorized") {
+            if (!cancelled) {
+              setGptAuthReady(true)
+              setDeviceAuth(null)
+              setDeviceError(null)
+            }
+            return
+          }
+
+          if (data.status === "slow_down") {
+            delayMs += 2000
+            continue
+          }
+
+          if (data.status === "pending") {
+            continue
+          }
+
+          if (data.status === "expired") {
+            if (!cancelled) {
+              setDeviceAuth(null)
+              setDeviceError("O código expirou. Inicie o login GPT novamente.")
+            }
+            return
+          }
+
+          if (data.status === "denied") {
+            if (!cancelled) {
+              setDeviceAuth(null)
+              setDeviceError("A autorização foi negada. Inicie novamente para gerar outro código.")
+            }
+            return
+          }
+
+          if (!cancelled) {
+            setDeviceAuth(null)
+            setDeviceError(data.error_description ?? "Não foi possível concluir o login GPT.")
+          }
+          return
+        } catch {
+          if (!cancelled) {
+            setDeviceAuth(null)
+            setDeviceError("Falha de rede ao validar o login. Tente novamente.")
+          }
+          return
+        }
+      }
+
+      if (!cancelled) {
+        setDeviceAuth(null)
+        setDeviceError("Tempo de autenticação esgotado. Gere um novo código.")
+      }
+    }
+
+    void pollAuth()
+    return () => {
+      cancelled = true
+    }
+  }, [deviceAuth])
+
+  async function startDeviceAuth() {
+    setDeviceLoading(true)
+    setDeviceError(null)
+
+    try {
+      const res = await fetch("/api/auth/device/start", { method: "POST" })
+      const data = await res.json() as DeviceStartResponse & { error?: string; details?: string }
+      if (!res.ok || !data.device_code || !data.user_code || !data.verification_uri) {
+        setDeviceError(data.error ?? data.details ?? "Não foi possível iniciar o login GPT por dispositivo.")
+        setDeviceAuth(null)
+        return
+      }
+
+      setDeviceAuth(data)
+    } catch {
+      setDeviceError("Erro de rede ao iniciar login GPT.")
+      setDeviceAuth(null)
+    } finally {
+      setDeviceLoading(false)
+    }
+  }
+
+  async function copyUserCode() {
+    if (!deviceAuth?.user_code) return
+    try {
+      await navigator.clipboard.writeText(deviceAuth.user_code)
+      setCopyFeedback("copied")
+    } catch {
+      setCopyFeedback("idle")
+    }
+  }
 
   return (
     <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
@@ -116,6 +316,36 @@ export function ChatWindow({
             <Share2 size={14} />
           </button>
 
+          {!gptAuthReady && (
+            <button
+              type="button"
+              onClick={() => { void startDeviceAuth() }}
+              disabled={deviceLoading}
+              className="h-7 inline-flex items-center gap-1.5 px-2.5 rounded-lg text-[11px] font-medium border transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-60 disabled:cursor-not-allowed"
+              style={{
+                color: "var(--text-primary)",
+                borderColor: "var(--border-color)",
+              }}
+              title="Entrar com ChatGPT por código de dispositivo"
+            >
+              <LogIn size={12} />
+              {deviceLoading ? "Iniciando..." : "Entrar GPT"}
+            </button>
+          )}
+
+          <a
+            href={geminiAuthReady ? geminiReconnectHref : geminiLoginHref}
+            className="h-7 inline-flex items-center gap-1.5 px-2.5 rounded-lg text-[11px] font-medium border transition-colors hover:bg-[var(--bg-hover)]"
+            style={{
+              color: geminiAuthReady ? "#1d4ed8" : "var(--text-primary)",
+              borderColor: geminiAuthReady ? "rgba(29,78,216,0.24)" : "var(--border-color)",
+            }}
+            title={geminiAuthReady ? "Trocar ou renovar a conta Google do Gemini" : "Conectar conta Google para usar Gemini"}
+          >
+            {geminiAuthReady ? <LogOut size={12} /> : <LogIn size={12} />}
+            {geminiAuthReady ? "Reconectar Google" : "Entrar Google"}
+          </a>
+
           <button
             onClick={onToggleRightPanel}
             className={cn(
@@ -163,6 +393,95 @@ export function ChatWindow({
       </div>
 
       {/* Input */}
+      {geminiError && (
+        <div className="mx-4 mb-3 rounded-xl border p-3" style={{ borderColor: "var(--border-color)", background: "var(--bg-card)" }}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex-1">
+              <p className="text-xs" style={{ color: "#b91c1c" }}>{geminiError}</p>
+              <a
+                href={geminiAuthReady ? geminiReconnectHref : geminiLoginHref}
+                className="text-[11px] underline"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                {geminiAuthReady ? "Reconectar conta Google" : "Conectar conta Google"}
+              </a>
+            </div>
+            <button
+              type="button"
+              onClick={() => setGeminiError(null)}
+              className="h-7 px-2 rounded-lg border text-[11px]"
+              style={{ borderColor: "var(--border-color)", color: "var(--text-secondary)" }}
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!gptAuthReady && (deviceAuth || deviceError) && (
+        <div className="mx-4 mb-3 rounded-xl border p-3" style={{ borderColor: "var(--border-color)", background: "var(--bg-card)" }}>
+          {deviceAuth && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                Abra o link abaixo, faça login no ChatGPT e informe o código.
+              </p>
+              <a
+                href={deviceAuth.verification_uri_complete ?? deviceAuth.verification_uri}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs underline break-all"
+                style={{ color: "var(--text-primary)" }}
+              >
+                {deviceAuth.verification_uri_complete ?? deviceAuth.verification_uri}
+              </a>
+              <div className="flex items-center gap-2">
+                <code
+                  className="text-sm px-2 py-1 rounded-md border"
+                  style={{ borderColor: "var(--border-color)", color: "var(--text-primary)", background: "var(--bg-sidebar)" }}
+                >
+                  {deviceAuth.user_code}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => { void copyUserCode() }}
+                  className="h-7 px-2 rounded-lg border text-[11px] inline-flex items-center gap-1"
+                  style={{ borderColor: "var(--border-color)", color: "var(--text-primary)" }}
+                >
+                  <Copy size={12} />
+                  {copyFeedback === "copied" ? "Copiado" : "Copiar"}
+                </button>
+              </div>
+              <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                Aguardando autorização... esta janela atualiza automaticamente.
+              </p>
+            </div>
+          )}
+
+          {deviceError && (
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex-1">
+                <p className="text-xs" style={{ color: "#b91c1c" }}>{deviceError}</p>
+                <a
+                  href="/api/auth/login?returnTo=/chat"
+                  className="text-[11px] underline"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  Tentar login por navegador
+                </a>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeviceError(null)}
+                className="h-7 px-2 rounded-lg border text-[11px]"
+                style={{ borderColor: "var(--border-color)", color: "var(--text-secondary)" }}
+              >
+                Fechar
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       <ChatInput
         selectedAgent={selectedAgent}
         onAgentChange={onAgentChange}

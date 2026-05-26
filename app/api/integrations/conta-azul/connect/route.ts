@@ -61,10 +61,5 @@ export async function GET() {
 
   const fullUrl = `${authUrl}?${params.toString()}`
 
-  // eslint-disable-next-line no-console
-  console.log("[Conta Azul OAuth] redirect_uri:", redirectUri)
-  // eslint-disable-next-line no-console
-  console.log("[Conta Azul OAuth] auth_url:", fullUrl)
-
   return NextResponse.redirect(fullUrl)
 }

@@ -604,9 +604,9 @@ function CompaniesTab() {
       setDrafts((prev) => { const n = { ...prev }; delete n[id]; return n })
       setFeedback((prev) => ({ ...prev, [id]: "ok" }))
       setTimeout(() => setFeedback((prev) => ({ ...prev, [id]: null })), 2500)
-    } catch (err: unknown) {
+    } catch {
+      // Erro detalhado já é registrado no servidor via activity-logger.
       setFeedback((prev) => ({ ...prev, [id]: "error" }))
-      console.error(err)
     } finally {
       setSaving(null)
     }
@@ -849,9 +849,13 @@ function UsersTab() {
 
   useEffect(() => {
     fetch("/api/users")
-      .then((r) => r.json() as Promise<{ users?: AuthUser[] } | AuthUser[]>)
-      .then((data) => {
-        setUsers(Array.isArray(data) ? data : (data.users ?? []))
+      .then((r) => r.json())
+      .then((data: unknown) => {
+        const list: AuthUser[] =
+          Array.isArray(data) ? data
+          : Array.isArray((data as any)?.users) ? (data as any).users
+          : []
+        setUsers(list)
         setLoading(false)
       })
       .catch(() => setLoading(false))
@@ -919,12 +923,13 @@ function UsersTab() {
 
 /* ─── Models ─── */
 
-const PROVIDERS = ["anthropic", "openai", "gemini"] as const
+const PROVIDERS = ["anthropic", "openai", "gemini", "deepseek"] as const
 
 const MODEL_OPTIONS: Record<string, string[]> = {
-  anthropic: ["claude-sonnet-4-6", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"],
+  anthropic: ["claude-sonnet-4-6", "claude-opus-4-7", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"],
   openai:    ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini"],
-  gemini:    ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash"],
+  gemini:    ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro", "gemini-1.5-flash"],
+  deepseek:  ["deepseek-chat", "deepseek-reasoner"],
 }
 
 interface AgentCfg {

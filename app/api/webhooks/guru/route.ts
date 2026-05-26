@@ -2,10 +2,17 @@ import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient }        from "@/lib/supabase-admin"
 import { resolveCompanyFromSale }   from "@/lib/sales-mapping"
 import { logActivity }              from "@/lib/activity-logger"
+import {
+  timingSafeStringCompare,
+  verifyHmacSignature,
+  readBoundedRawBody,
+} from "@/lib/security"
+import { rateLimit, getClientIp } from "@/lib/rate-limit"
 
 export const dynamic = "force-dynamic"
 
-const WEBHOOK_SECRET = process.env.GURU_WEBHOOK_SECRET ?? process.env.JARVIS_WEBHOOK_SECRET ?? ""
+const WEBHOOK_SECRET     = process.env.GURU_WEBHOOK_SECRET ?? process.env.JARVIS_WEBHOOK_SECRET ?? ""
+const GURU_HMAC_SECRET   = process.env.GURU_HMAC_SECRET ?? ""
 
 // ─── Parser defensivo para payload da Guru ────────────────────────────────────
 // A Guru pode enviar payloads com estrutura variável entre webhooks de transação.
@@ -104,7 +111,9 @@ function parseGuruPayload(raw: any) {
     utmContent,
     utmTerm,
     metadata: {
-      raw_payload:         raw,
+      // raw_payload NÃO é salvo aqui — Guru envia dados de cartão, endereço
+      // e outras PII em alguns webhooks. Para diagnosticar é melhor consultar
+      // o painel da Guru direto. Aqui só guardamos o evento + ids.
       guru_event:          str(raw?.event ?? raw?.type),
       subscription_id:     subscriptionId,
       subscription_status: subscriptionStatus,
@@ -113,18 +122,51 @@ function parseGuruPayload(raw: any) {
 }
 
 export async function POST(req: NextRequest) {
-  // Validar secret
-  const secret = req.headers.get("x-guru-webhook-secret")
+  // Rate limit por IP — antes de validar secret.
+  const ip = getClientIp(req)
+  const rl = rateLimit(`webhook-guru:${ip}`, { limit: 120, windowMs: 60_000 })
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "Too many requests" },
+      { status: 429, headers: { "Retry-After": String(rl.resetIn) } },
+    )
+  }
+
+  // Fail-closed: precisa de algum mecanismo de autenticação configurado.
+  if (!WEBHOOK_SECRET && !GURU_HMAC_SECRET) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  // Limita body para evitar DoS.
+  const bodyResult = await readBoundedRawBody(req)
+  if (!bodyResult.ok) {
+    return NextResponse.json({ error: "Payload muito grande" }, { status: 413 })
+  }
+  const rawBody = bodyResult.raw
+
+  // Aceita assinatura HMAC OU secret no header. HMAC tem preferência.
+  const hmacHeader = req.headers.get("x-hub-signature-256")
+    ?? req.headers.get("x-guru-signature")
+    ?? ""
+  const headerSecret = req.headers.get("x-guru-webhook-secret")
     ?? req.headers.get("x-jarvis-webhook-secret")
     ?? ""
-  if (!WEBHOOK_SECRET || secret !== WEBHOOK_SECRET) {
+
+  let authorized = false
+  if (GURU_HMAC_SECRET && hmacHeader) {
+    authorized = verifyHmacSignature(rawBody, hmacHeader, GURU_HMAC_SECRET)
+  }
+  if (!authorized && WEBHOOK_SECRET) {
+    authorized = timingSafeStringCompare(headerSecret, WEBHOOK_SECRET)
+  }
+  if (!authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let raw: any
   try {
-    raw = await req.json()
+    raw = JSON.parse(rawBody)
   } catch {
     return NextResponse.json({ error: "JSON inválido" }, { status: 400 })
   }

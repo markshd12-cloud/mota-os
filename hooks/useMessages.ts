@@ -27,7 +27,7 @@ export function useMessages(sessionId: string | null) {
     const supabase = createClient()
     const { data } = await supabase
       .from("messages")
-      .select("*, agent:agents(short_name, color)")
+      .select("id, session_id, role, content, created_at, agent:agents(short_name, color)")
       .eq("session_id", id)
       .order("created_at", { ascending: true })
 

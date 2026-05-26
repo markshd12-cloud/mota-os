@@ -1,35 +1,26 @@
 /**
- * OpenAI connector — Jarvis
- * Credenciais em .env.local → OPENAI_API_KEY
- * Usar apenas em Server Components, Route Handlers ou Server Actions.
+ * OpenAI connector — Mota OS (OAuth/Codex)
+ * Sem API key estática.
  */
 
-import OpenAI from "openai"
+import { requestCodexResponse } from "@/lib/codex-client"
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 export interface OpenAIConfig {
-  apiKey:        string
-  organization?: string
   defaultModel:  OpenAIModel
 }
 
 function getConfig(): OpenAIConfig {
   return {
-    apiKey:       process.env.OPENAI_API_KEY ?? "",
-    organization: process.env.OPENAI_ORG_ID,
-    defaultModel: "gpt-4o",
+    defaultModel: "gpt-5.3-codex",
   }
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type OpenAIModel =
-  | "gpt-4o"
-  | "gpt-4o-mini"
-  | "gpt-4-turbo"
-  | "o1"
-  | "o1-mini"
+  | "gpt-5.3-codex"
 
 export interface OpenAIMessage {
   role:    "system" | "user" | "assistant"
@@ -70,83 +61,54 @@ export interface OpenAIImageResponse {
 // ─── Pricing (USD per token) ─────────────────────────────────────────────────
 
 const PRICING: Record<OpenAIModel, { in: number; out: number }> = {
-  "gpt-4o":      { in: 0.000005,   out: 0.000015  },
-  "gpt-4o-mini": { in: 0.00000015, out: 0.0000006 },
-  "gpt-4-turbo": { in: 0.00001,    out: 0.00003   },
-  "o1":          { in: 0.000015,   out: 0.00006   },
-  "o1-mini":     { in: 0.000003,   out: 0.000012  },
+  "gpt-5.3-codex": { in: 0, out: 0 },
 }
 
 // ─── Client ──────────────────────────────────────────────────────────────────
 
 export class OpenAIClient {
-  private sdk: OpenAI
-
-  constructor(private config: OpenAIConfig) {
-    this.sdk = new OpenAI({
-      apiKey:       config.apiKey,
-      organization: config.organization,
-    })
-  }
+  constructor(private config: OpenAIConfig) {}
 
   /** Completion síncrona. */
   async chat(request: OpenAIChatRequest): Promise<OpenAIChatResponse> {
-    const response = await this.sdk.chat.completions.create({
-      model:       request.model       ?? this.config.defaultModel,
-      messages:    request.messages,
-      max_tokens:  request.max_tokens,
-      temperature: request.temperature,
-    })
+    const response = await requestCodexResponse(
+      request.messages
+        .filter((m) => m.role !== "system")
+        .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
+    )
+
+    if (!response.ok) {
+      throw new Error(response.error || "Falha no OAuth OpenAI")
+    }
 
     return {
-      id:      response.id,
+      id:      `codex-${Date.now()}`,
       model:   response.model,
-      content: response.choices[0]?.message?.content ?? "",
+      content: response.text,
       usage: {
-        prompt_tokens:     response.usage?.prompt_tokens     ?? 0,
-        completion_tokens: response.usage?.completion_tokens ?? 0,
-        total_tokens:      response.usage?.total_tokens      ?? 0,
+        prompt_tokens:     response.usage.input_tokens,
+        completion_tokens: response.usage.output_tokens,
+        total_tokens:      response.usage.input_tokens + response.usage.output_tokens,
       },
     }
   }
 
   /** Streaming — yield de tokens de texto conforme chegam. */
   async *stream(request: OpenAIChatRequest): AsyncGenerator<string> {
-    const stream = await this.sdk.chat.completions.create({
-      model:       request.model       ?? this.config.defaultModel,
-      messages:    request.messages,
-      max_tokens:  request.max_tokens,
-      temperature: request.temperature,
-      stream:      true,
-    })
-
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content
-      if (delta) yield delta
+    const response = await this.chat(request)
+    if (response.content) {
+      yield response.content
     }
   }
 
   /** Geração de imagem com DALL-E. */
   async generateImage(request: OpenAIImageRequest): Promise<OpenAIImageResponse> {
-    const response = await this.sdk.images.generate({
-      prompt:  request.prompt,
-      model:   request.model   ?? "dall-e-3",
-      size:    request.size    ?? "1024x1024",
-      quality: request.quality ?? "standard",
-      n:       request.n       ?? 1,
-    })
-
-    return {
-      created: response.created,
-      data:    (response.data ?? []).map((d) => ({
-        url:             d.url ?? "",
-        revised_prompt:  d.revised_prompt,
-      })),
-    }
+    void request
+    throw new Error("Geração de imagem não suportada no fluxo OAuth/Codex sem API key")
   }
 
   /** Custo estimado em USD. */
-  estimateCost(promptTokens: number, completionTokens: number, model: OpenAIModel = "gpt-4o"): number {
+  estimateCost(promptTokens: number, completionTokens: number, model: OpenAIModel = "gpt-5.3-codex"): number {
     const p = PRICING[model]
     return promptTokens * p.in + completionTokens * p.out
   }

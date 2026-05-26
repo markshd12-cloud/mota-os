@@ -57,7 +57,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         setAllowedCompanies(allowed ?? [])
         setUserRole(role ?? "viewer")
       })
-      .catch(console.error)
+      .catch(() => { /* falha silenciosa — usuário não logado ou rede off */ })
       .finally(() => setLoading(false))
   }, [])
 

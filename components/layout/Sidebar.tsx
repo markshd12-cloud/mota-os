@@ -115,14 +115,15 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const [unreadNews,  setUnreadNews]  = useState(0)
 
   useEffect(() => {
-    const supabase = createClient()
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        const email = user.email ?? ""
-        setUserEmail(email)
-        setUserInitial((email[0] ?? "U").toUpperCase())
-      }
-    })
+    fetch("/api/profile")
+      .then(r => r.ok ? r.json() : null)
+      .then((data: { email?: string } | null) => {
+        if (data?.email) {
+          setUserEmail(data.email)
+          setUserInitial((data.email[0] ?? "U").toUpperCase())
+        }
+      })
+      .catch(() => {})
   }, [])
 
   useEffect(() => {

@@ -1,6 +1,27 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 
+// ─── Security headers ─────────────────────────────────────────────────────────
+// Aplicados via proxy.ts porque o `headers()` do next.config.ts não roda em
+// Turbopack dev. Aqui pegamos TODAS as respostas que passam pelo matcher.
+const securityHeaders: Record<string, string> = {
+  "X-Frame-Options":        "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy":        "strict-origin-when-cross-origin",
+  "Permissions-Policy":     "camera=(), microphone=(), geolocation=(), interest-cohort=(), payment=(), usb=()",
+}
+
+function applySecurityHeaders(response: NextResponse): NextResponse {
+  for (const [key, value] of Object.entries(securityHeaders)) {
+    response.headers.set(key, value)
+  }
+  // HSTS apenas em produção (HTTP em localhost quebraria com max-age longo).
+  if (process.env.NODE_ENV === "production") {
+    response.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+  }
+  return response
+}
+
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -32,16 +53,16 @@ export async function proxy(request: NextRequest) {
   if (!user && !isAuthRoute) {
     const url = request.nextUrl.clone()
     url.pathname = "/login"
-    return NextResponse.redirect(url)
+    return applySecurityHeaders(NextResponse.redirect(url))
   }
 
   if (user && isAuthRoute) {
     const url = request.nextUrl.clone()
     url.pathname = "/dashboard"
-    return NextResponse.redirect(url)
+    return applySecurityHeaders(NextResponse.redirect(url))
   }
 
-  return supabaseResponse
+  return applySecurityHeaders(supabaseResponse)
 }
 
 export const config = {

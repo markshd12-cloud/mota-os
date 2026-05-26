@@ -1,17 +1,3 @@
-/**
- * Troca credenciais Auth0 por um JWT válido para WIF da Anthropic.
- * Salva o token no caminho definido por ANTHROPIC_IDENTITY_TOKEN_FILE.
- *
- * Uso:
- *   node scripts/refresh-anthropic-token.mjs
- *
- * Variáveis de ambiente necessárias (adicione ao .env.local ou env vars do Coolify):
- *   AUTH0_DOMAIN         → ex: minha-empresa.us.auth0.com
- *   AUTH0_CLIENT_ID      → Client ID da aplicação M2M
- *   AUTH0_CLIENT_SECRET  → Client Secret da aplicação M2M
- *   ANTHROPIC_IDENTITY_TOKEN_FILE → caminho onde o token será salvo
- */
-
 import { writeFileSync, mkdirSync } from "fs"
 import { dirname }                  from "path"
 

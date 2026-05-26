@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient }        from "@/lib/supabase-admin"
 import { resolveCompanyFromSale }   from "@/lib/sales-mapping"
 import { logActivity }              from "@/lib/activity-logger"
+import { timingSafeStringCompare, readBoundedRawBody } from "@/lib/security"
+import { parseJson, salesWebhookSchema } from "@/lib/validators"
+import { rateLimit, getClientIp }        from "@/lib/rate-limit"
 
 export const dynamic = "force-dynamic"
 
@@ -42,18 +45,37 @@ function toNum(v: number | string | undefined | null): number | null {
 }
 
 export async function POST(req: NextRequest) {
-  // Validar secret
-  const secret = req.headers.get("x-jarvis-webhook-secret") ?? ""
-  if (!WEBHOOK_SECRET || secret !== WEBHOOK_SECRET) {
+  // Rate limit por IP — 120 req/min antes mesmo de validar secret, pra não
+  // permitir que um atacante use a rota como oracle pra adivinhar o secret.
+  const ip = getClientIp(req)
+  const rl = rateLimit(`webhook-sales:${ip}`, { limit: 120, windowMs: 60_000 })
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "Too many requests" },
+      { status: 429, headers: { "Retry-After": String(rl.resetIn) } },
+    )
+  }
+
+  // Fail-closed se o secret não estiver configurado.
+  if (!WEBHOOK_SECRET) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  let payload: SalesWebhookPayload
-  try {
-    payload = await req.json() as SalesWebhookPayload
-  } catch {
-    return NextResponse.json({ error: "JSON inválido" }, { status: 400 })
+  // Comparação resistente a timing attacks.
+  const secret = req.headers.get("x-jarvis-webhook-secret") ?? ""
+  if (!timingSafeStringCompare(secret, WEBHOOK_SECRET)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
+
+  // Limita body a 256 KB para evitar DoS por payload gigante.
+  const bodyResult = await readBoundedRawBody(req)
+  if (!bodyResult.ok) {
+    return NextResponse.json({ error: "Payload muito grande" }, { status: 413 })
+  }
+
+  const parsed = parseJson(bodyResult.raw, salesWebhookSchema)
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+  const payload = parsed.data as SalesWebhookPayload
 
   const source = payload.source ?? "webhook"
 
