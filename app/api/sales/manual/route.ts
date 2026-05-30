@@ -4,6 +4,7 @@ import { createAdminClient }        from "@/lib/supabase-admin"
 import { isGlobalAdmin }            from "@/lib/company-scope"
 import { ALL_SLUGS }                from "@/lib/company-scope"
 import { logActivity }              from "@/lib/activity-logger"
+import { dbError as handleDbError } from "@/lib/api-error"
 
 export const dynamic = "force-dynamic"
 
@@ -104,7 +105,7 @@ export async function POST(req: NextRequest) {
         .select("id")
         .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return handleDbError(error, "sales_transactions.upsert[manual]")
 
   void logActivity({
     userId:    user.id,

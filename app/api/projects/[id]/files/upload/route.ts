@@ -1,9 +1,11 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin, getAllowedCompanyIds } from "@/lib/company-scope"
 import { logActivity }       from "@/lib/activity-logger"
 import { mapProjectFile }    from "@/lib/project-helpers"
+
+export const dynamic = "force-dynamic"
 
 type Ctx = { params: Promise<{ id: string }> }
 
@@ -72,7 +74,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
   if (error) {
     // Remove o arquivo do storage se o registro falhou
     await admin.storage.from(BUCKET).remove([storagePath])
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
   }
 
   void logActivity({

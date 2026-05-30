@@ -1,8 +1,10 @@
-import { createClient } from '@/lib/supabase-server'
+﻿import { createClient } from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { isGlobalAdmin } from '@/lib/company-scope'
 import { logActivity } from '@/lib/activity-logger'
 import { mapAgentFile, type ApiAgentFile } from '@/lib/agent-helpers'
+
+export const dynamic = "force-dynamic"
 
 type Ctx = { params: Promise<{ id: string }> }
 

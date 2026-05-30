@@ -1,8 +1,10 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { logActivity }       from "@/lib/activity-logger"
 import { isGlobalAdmin }     from "@/lib/company-scope"
+
+export const dynamic = "force-dynamic"
 
 const ALLOWED_PROVIDERS = ["anthropic", "openai", "gemini"] as const
 type AllowedProvider = (typeof ALLOWED_PROVIDERS)[number]
@@ -26,7 +28,7 @@ export async function GET() {
       .select("agent_id, provider, model_id, system_prompt, temperature, max_tokens, updated_at"),
   ])
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   const cfgMap = new Map((configs ?? []).map((c) => [c.agent_id, c]))
 
@@ -122,7 +124,7 @@ export async function PATCH(req: NextRequest) {
   ])
 
   if (cfgResult.error) {
-    return NextResponse.json({ error: cfgResult.error.message }, { status: 500 })
+    return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
   }
 
   void logActivity({

@@ -1,7 +1,9 @@
-import { NextRequest } from 'next/server'
+﻿import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { mapAgentFile, type ApiAgentFile } from '@/lib/agent-helpers'
+
+export const dynamic = "force-dynamic"
 
 type Ctx = { params: Promise<{ id: string }> }
 

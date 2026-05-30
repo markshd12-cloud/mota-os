@@ -1,12 +1,42 @@
 /**
- * Rate limiter em memória (sliding window).
+ * Rate limiter em memória (sliding window) + helpers de tamanho de body.
  * SERVER-SIDE ONLY.
  *
  * IMPORTANTE: funciona em deploy single-instance (Coolify, VPS, processo único).
- * Em serverless multi-instance (Vercel multi-region, AWS Lambda) cada instância
- * tem seu próprio Map, então o limite efetivo é (limit × instâncias). Para
- * produção em larga escala, trocar por Upstash Redis ou similar.
+ * Em serverless multi-instance (Vercel multi-region) o limite é por instância.
+ * Para produção em escala, trocar por Upstash Redis ou similar.
  */
+
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+
+export interface RateLimitResult {
+  ok:        boolean
+  limit:     number
+  remaining: number
+  resetAt:   number  // timestamp ms quando a janela reseta
+  resetIn:   number  // segundos até resetar (compat legada)
+}
+
+// ─── Limites de requisições por rota ─────────────────────────────────────────
+
+export const RATE_LIMITS = {
+  chat:       { limit: 30,  windowMs: 60_000 },
+  slashAgent: { limit: 30,  windowMs: 60_000 },
+  browser:    { limit: 5,   windowMs: 60_000 },
+  finance:    { limit: 10,  windowMs: 60_000 },
+  automation: { limit: 20,  windowMs: 60_000 },
+  default:    { limit: 60,  windowMs: 60_000 },
+} as const
+
+// ─── Limites de tamanho de body (bytes) ──────────────────────────────────────
+
+export const BODY_LIMITS = {
+  chat:      120_000,   // ~120 KB — chat normal
+  summarize: 250_000,   // ~250 KB — /summarize aceita textos maiores
+  default:   100_000,   // ~100 KB — demais rotas
+} as const
+
+// ─── Bucket store ─────────────────────────────────────────────────────────────
 
 interface Bucket {
   windowStart: number
@@ -15,7 +45,6 @@ interface Bucket {
 
 const buckets = new Map<string, Bucket>()
 
-// Limpa buckets expirados a cada 5 minutos pra não vazar memória.
 let lastCleanup = Date.now()
 const CLEANUP_INTERVAL = 5 * 60_000
 
@@ -27,23 +56,19 @@ function cleanup(now: number, maxAgeMs: number) {
   }
 }
 
-export interface RateLimitResult {
-  ok:        boolean
-  remaining: number
-  resetIn:   number // segundos até a janela resetar
-}
+// ─── rateLimit ────────────────────────────────────────────────────────────────
 
 /**
- * Aplica rate limit em uma chave (geralmente IP, user ID ou IP+route).
- * Retorna `{ ok: false }` se excedeu — chamador deve responder 429.
+ * Aplica rate limit em uma chave (geralmente user ID ou IP+route).
+ * Retorna `{ ok: false }` se excedeu o limite — chamador deve responder 429.
  *
  * @example
- *   const rl = rateLimit(`webhook-sales:${ip}`, { limit: 60, windowMs: 60_000 })
- *   if (!rl.ok) return NextResponse.json({ error: "Too many requests" }, { status: 429 })
+ *   const rl = rateLimit(`chat:${user.id}`, RATE_LIMITS.chat)
+ *   if (!rl.ok) return rateLimitSseResponse(rl.resetAt)
  */
 export function rateLimit(
-  key:    string,
-  opts:   { limit: number; windowMs: number },
+  key:  string,
+  opts: { limit: number; windowMs: number },
 ): RateLimitResult {
   const now = Date.now()
   cleanup(now, opts.windowMs * 2)
@@ -51,25 +76,90 @@ export function rateLimit(
   const existing = buckets.get(key)
   if (!existing || now - existing.windowStart >= opts.windowMs) {
     buckets.set(key, { windowStart: now, count: 1 })
-    return { ok: true, remaining: opts.limit - 1, resetIn: Math.ceil(opts.windowMs / 1000) }
+    return {
+      ok:        true,
+      limit:     opts.limit,
+      remaining: opts.limit - 1,
+      resetAt:   now + opts.windowMs,
+      resetIn:   Math.ceil(opts.windowMs / 1000),
+    }
   }
 
   existing.count++
   const remaining = Math.max(0, opts.limit - existing.count)
-  const resetIn   = Math.ceil((existing.windowStart + opts.windowMs - now) / 1000)
+  const resetAt   = existing.windowStart + opts.windowMs
+  const resetIn   = Math.ceil((resetAt - now) / 1000)
 
-  return { ok: existing.count <= opts.limit, remaining, resetIn }
+  return { ok: existing.count <= opts.limit, limit: opts.limit, remaining, resetAt, resetIn }
+}
+
+// ─── Responses ────────────────────────────────────────────────────────────────
+
+/**
+ * Resposta 429 padrão JSON.
+ */
+export function rateLimitResponse(resetAt: number): Response {
+  return new Response(
+    JSON.stringify({ error: "Muitas requisições. Tente novamente em alguns instantes." }),
+    {
+      status: 429,
+      headers: {
+        "Content-Type":  "application/json",
+        "Retry-After":   String(Math.ceil((resetAt - Date.now()) / 1000)),
+      },
+    },
+  )
 }
 
 /**
- * Extrai IP do cliente de forma defensiva. Não confia cegamente em
- * X-Forwarded-For (que pode ser falsificado por clientes diretos), mas
- * usa o primeiro valor quando a request veio através de proxy/CDN confiável.
- *
- * Para produção atrás de Cloudflare/Coolify proxy, configurar a infraestrutura
- * para popular esses headers e remover qualquer header X-Forwarded-* enviado
- * pelo cliente.
+ * Resposta 429 em formato SSE (para rotas de streaming).
  */
+export function rateLimitSseResponse(resetAt: number): Response {
+  const retryIn = Math.ceil((resetAt - Date.now()) / 1000)
+  return new Response(
+    `data: ${JSON.stringify({ type: "error", error: `Limite de requisições atingido. Aguarde ${retryIn}s.` })}\n\n`,
+    {
+      status: 429,
+      headers: {
+        "Content-Type":  "text/event-stream",
+        "Retry-After":   String(retryIn),
+      },
+    },
+  )
+}
+
+// ─── Body size helpers ────────────────────────────────────────────────────────
+
+/**
+ * Retorna o tamanho aproximado do body em bytes antes de fazer `.json()`.
+ * Usa o header Content-Length quando disponível (mais barato).
+ * Retorna null se não for possível calcular.
+ */
+export function getRequestBodySize(req: Request): number | null {
+  const cl = req.headers.get("content-length")
+  if (cl) {
+    const n = parseInt(cl, 10)
+    return isNaN(n) ? null : n
+  }
+  return null
+}
+
+/**
+ * Verifica se o body da request ultrapassa um limite em bytes.
+ * Usa Content-Length quando disponível (sem consumir o stream).
+ * Se não houver Content-Length, assume que cabe (retorna false).
+ */
+export function isBodyTooLarge(req: Request, limitBytes: number): boolean {
+  const size = getRequestBodySize(req)
+  if (size === null) return false   // não sabe — deixa passar, validar depois
+  return size > limitBytes
+}
+
+/** Alias de compatibilidade para código existente que usa rateLimitJsonResponse. */
+export const rateLimitJsonResponse = rateLimitResponse
+
+// ─── IP helper (compat) ───────────────────────────────────────────────────────
+
 export function getClientIp(req: Request): string {
   const xfwd = req.headers.get("x-forwarded-for")
   if (xfwd) return xfwd.split(",")[0].trim()

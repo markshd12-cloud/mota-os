@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server"
+﻿import { NextRequest } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { streamChat }        from "@/lib/ai-service"
@@ -7,6 +7,9 @@ import { getAllowedCompanyIds, getCurrentCompany } from "@/lib/company-scope"
 import { buildWorkflowPrompt } from "@/lib/workflow-prompts"
 import { embedText }           from "@/lib/rag/embeddings"
 import type { WorkflowStep } from "@/lib/workflow-types"
+import { rateLimit, RATE_LIMITS, rateLimitSseResponse } from "@/lib/rate-limit"
+
+export const dynamic = "force-dynamic"
 
 function sse(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`)
@@ -39,6 +42,10 @@ export async function POST(
       { status: 401, headers: { "Content-Type": "text/event-stream" } },
     )
   }
+
+  // ─── Rate limiting ────────────────────────────────────────────────────────
+  const rl = rateLimit(`workflow:${user.id}`, RATE_LIMITS.default)
+  if (!rl.ok) return rateLimitSseResponse(rl.resetAt)
 
   const body = await req.json() as {
     input?:      Record<string, string | string[]>

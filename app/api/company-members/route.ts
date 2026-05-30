@@ -1,8 +1,10 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin, getAllowedCompanyIds, ALL_SLUGS } from "@/lib/company-scope"
 import { logActivity } from "@/lib/activity-logger"
+
+export const dynamic = "force-dynamic"
 
 // ─── GET — lista membros de uma empresa ──────────────────────────────────────
 
@@ -33,7 +35,7 @@ export async function GET(req: NextRequest) {
     .eq("company_id", companyId)
     .order("created_at")
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   // Enriquecer com dados do perfil
   const userIds = (members ?? []).map(m => m.user_id).filter(Boolean)
@@ -88,7 +90,7 @@ export async function POST(req: NextRequest) {
     .select("id, company_id, user_id, role, status")
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId:    user.id,
@@ -146,7 +148,7 @@ export async function PATCH(req: NextRequest) {
 
   const { data, error } = await q.select("id, role, status").single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId:    user.id,
@@ -183,7 +185,7 @@ export async function DELETE(req: NextRequest) {
     .eq("company_id", body.company_id)
     .eq("user_id", body.user_id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId:    user.id,

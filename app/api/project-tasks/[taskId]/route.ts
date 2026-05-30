@@ -1,9 +1,11 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin, getAllowedCompanyIds } from "@/lib/company-scope"
 import { logActivity } from "@/lib/activity-logger"
 import { mapTask, refreshProjectCounts } from "@/lib/project-helpers"
+
+export const dynamic = "force-dynamic"
 
 type Ctx = { params: Promise<{ taskId: string }> }
 
@@ -73,7 +75,7 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   const { data, error } = await admin
     .from("tasks").update(updates).eq("id", taskId).select().single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void refreshProjectCounts(admin, task.project_id)
 
@@ -99,7 +101,7 @@ export async function DELETE(_req: NextRequest, { params }: Ctx) {
   if (!allowed) return NextResponse.json({ error: "Sem acesso" }, { status: 403 })
 
   const { error } = await admin.from("tasks").update({ archived: true }).eq("id", taskId)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void refreshProjectCounts(admin, task.project_id)
 

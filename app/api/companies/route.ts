@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { logActivity }       from "@/lib/activity-logger"
+
+export const dynamic = "force-dynamic"
 
 // ─── GET — lista todas as empresas ───────────────────────────────────────────
 
@@ -17,7 +19,7 @@ export async function GET() {
     .select("id, slug, name, description, color, initials, active, logo_url, updated_at")
     .order("name")
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   return NextResponse.json(data ?? [])
 }
@@ -74,7 +76,7 @@ export async function PATCH(req: NextRequest) {
     .select("id, slug, name, description, color, initials, active, updated_at")
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId:    user.id,

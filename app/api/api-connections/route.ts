@@ -1,8 +1,10 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { logActivity }       from "@/lib/activity-logger"
 import { isGlobalAdmin }     from "@/lib/company-scope"
+
+export const dynamic = "force-dynamic"
 
 const KNOWN_PROVIDERS = [
   "anthropic", "openai", "gemini", "supabase", "rocketchat",
@@ -51,7 +53,7 @@ export async function GET() {
     .from("api_connections")
     .select("id, provider, status, config, last_tested_at, error_message, updated_at")
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   const dbMap = new Map((rows ?? []).map((r) => [r.provider, r]))
 
@@ -127,7 +129,7 @@ export async function PATCH(req: NextRequest) {
     .select("id, status, updated_at")
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId:    user.id,
@@ -164,7 +166,7 @@ export async function DELETE(req: NextRequest) {
 
   const { error } = await query
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId:    user.id,

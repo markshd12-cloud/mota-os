@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { logActivity }       from "@/lib/activity-logger"
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     .order("last_seen_at", { ascending: false })
     .limit(10)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   return NextResponse.json({
     sessions: (data ?? []).map((s) => ({

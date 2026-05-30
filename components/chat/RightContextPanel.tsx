@@ -54,7 +54,7 @@ const TYPE_LABELS: Record<string, string> = {
 interface RightContextPanelProps {
   open:           boolean
   onClose:        () => void
-  agent:          Agent
+  agent:          Agent | null
   sessionTitle:   string
   sessionId?:     string | null
   companyId?:     string
@@ -111,36 +111,44 @@ export function RightContextPanel({
           <div className="flex-1 overflow-y-auto">
             {/* Active agent */}
             <Section icon={Bot} label="Agente ativo">
-              <div
-                className="flex items-center gap-3 p-3 rounded-xl border"
-                style={{ borderColor: `${agent.color}30`, background: agent.bg }}
-              >
+              {!agent ? (
+                <p className="text-xs px-3 py-2" style={{ color: "var(--text-muted)" }}>
+                  Jarvis padrão — nenhum agente selecionado
+                </p>
+              ) : (
+              <div className="space-y-2">
                 <div
-                  className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-                  style={{ background: `${agent.color}20` }}
+                  className="flex items-center gap-3 p-3 rounded-xl border"
+                  style={{ borderColor: `${agent.color}30`, background: agent.bg }}
                 >
-                  <agent.icon size={16} style={{ color: agent.color }} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold truncate" style={{ color: "var(--text-primary)" }}>
-                    {agent.name}
-                  </p>
-                  <p className="text-[10px] mt-0.5 leading-relaxed" style={{ color: "var(--text-muted)" }}>
-                    {agent.description}
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-1 mt-2">
-                {agent.capabilities.map((cap) => (
-                  <span
-                    key={cap}
-                    className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                    style={{ background: `${agent.color}15`, color: agent.color }}
+                  <div
+                    className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                    style={{ background: `${agent.color}20` }}
                   >
-                    {cap}
-                  </span>
-                ))}
+                    <agent.icon size={16} style={{ color: agent.color }} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold truncate" style={{ color: "var(--text-primary)" }}>
+                      {agent.name}
+                    </p>
+                    <p className="text-[10px] mt-0.5 leading-relaxed" style={{ color: "var(--text-muted)" }}>
+                      {agent.description}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {agent.capabilities.map((cap) => (
+                    <span
+                      key={cap}
+                      className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                      style={{ background: `${agent.color}15`, color: agent.color }}
+                    >
+                      {cap}
+                    </span>
+                  ))}
+                </div>
               </div>
+              )}
             </Section>
 
             {/* Active sources */}

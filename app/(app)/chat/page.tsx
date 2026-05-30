@@ -12,10 +12,13 @@ import type { Message } from "@/lib/mocks/messages"
 
 // ─── Tipos dos eventos SSE ────────────────────────────────────────────────────
 
-interface SSEDelta { type: "delta"; text: string }
-interface SSEDone  { type: "done";  session_id: string; model: string; provider: string; usage: { input_tokens: number; output_tokens: number }; error: null }
-interface SSEError { type: "error"; error: string }
-type SSEEvent = SSEDelta | SSEDone | SSEError
+import type { AIMode } from "@/lib/ai/model-registry"
+
+interface SSEDelta        { type: "delta";        text: string }
+interface SSEDone         { type: "done";         session_id: string; model: string; provider: string; usage: { input_tokens: number; output_tokens: number }; error: string | null }
+interface SSEError        { type: "error";        error: string }
+interface SSEAgentRouted  { type: "agent_routed"; command: string; label: string }
+type SSEEvent = SSEDelta | SSEDone | SSEError | SSEAgentRouted
 
 function parseSSE(raw: string): SSEEvent | null {
   const line = raw.startsWith("data: ") ? raw.slice(6) : raw
@@ -48,14 +51,8 @@ export default function ChatPage() {
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
 
-  // Seleciona o primeiro agente ao carregar
-  useEffect(() => {
-    if (agentList.length > 0 && !selectedAgent) {
-      setSelectedAgent(agentList[0])
-    }
-  }, [agentList, selectedAgent])
-
-  // Sincroniza selectedAgent com dados reais após carregamento
+  // Não auto-seleciona agente em nova sessão.
+  // Sincroniza apenas se o usuário JÁ tiver um agente selecionado (dados atualizados do banco)
   useEffect(() => {
     if (!agentsLoading && agentList.length > 0 && selectedAgent) {
       const updated = agentList.find((a) => a.shortName === selectedAgent.shortName)
@@ -68,15 +65,15 @@ export default function ChatPage() {
   function selectSession(id: string) {
     setActiveSessionId(id)
     const session = sessions.find((s) => s.id === id)
-    if (session) {
-      const matched = agentList.find((a) => a.shortName === session.agentName)
-      if (matched) setSelectedAgent(matched)
-    }
+    // SEMPRE define (ou limpa) o agente — sem agentName = sem agente ativo
+    const agentName = session?.agentName || null
+    const matched   = agentName ? agentList.find((a) => a.shortName === agentName) ?? null : null
+    setSelectedAgent(matched)
   }
 
   function newSession() {
     setActiveSessionId(null)
-    if (agentList.length > 0) setSelectedAgent(agentList[0])
+    setSelectedAgent(null)   // nova sessão começa sem agente pré-selecionado
   }
 
   async function handleArchive(id: string): Promise<boolean> {
@@ -97,8 +94,12 @@ export default function ChatPage() {
     if (enriched) setSelectedAgent(enriched)
   }
 
-  const handleSend = useCallback(async (text: string) => {
-    if (!text.trim() || isTyping || !selectedAgent) return
+  const handleSend = useCallback(async (
+    text:          string,
+    aiMode:        AIMode    = "jarvis",
+    attachmentIds: string[]  = [],
+  ) => {
+    if (!text.trim() || isTyping) return
 
     // ── Mensagens otimistas ──────────────────────────────────────────────────
     const userMsg: Message = {
@@ -111,8 +112,9 @@ export default function ChatPage() {
     const aiMsg: Message = {
       id:         aiMsgId,
       role:       "assistant",
-      agentName:  selectedAgent.shortName,
-      agentColor: selectedAgent.color,
+      agentName:  selectedAgent?.shortName ?? "Jarvis",
+      agentColor: selectedAgent?.color     ?? "#16a34a",
+      aiMode,
       timestamp:  new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
       content:    [{ kind: "text" as const, content: "" }],
     }
@@ -137,11 +139,13 @@ export default function ChatPage() {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({
-          messages:     history,
-          session_id:   activeSessionId,
-          agent_id:     selectedAgent.dbId || null,
-          user_message: text,
-          company_id:   companyId ?? "grupo",
+          messages:         history,
+          session_id:       activeSessionId,
+          agent_id:         selectedAgent?.dbId || null,
+          user_message:     text,
+          company_id:       companyId ?? "grupo",
+          selected_ai_mode: aiMode,
+          attachment_ids:   attachmentIds.length > 0 ? attachmentIds : undefined,
         }),
         signal: abortRef.current.signal,
       })
@@ -170,7 +174,16 @@ export default function ChatPage() {
             const event = parseSSE(line)
             if (!event) continue
 
-            if (event.type === "delta") {
+            if (event.type === "agent_routed") {
+              // Atualiza a mensagem IA com o badge do slash agent
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === aiMsgId
+                    ? { ...m, agentName: event.label, slashCommand: event.command, slashAgentLabel: event.label }
+                    : m
+                )
+              )
+            } else if (event.type === "delta") {
               accumulated += event.text
               const snap = accumulated
               setMessages((prev) =>
@@ -182,6 +195,19 @@ export default function ChatPage() {
               )
             } else if (event.type === "done") {
               pendingSid = event.session_id
+              // Atualiza a mensagem IA com o modelo/provider usado
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === aiMsgId
+                    ? {
+                        ...m,
+                        modelUsed:      event.model,
+                        providerUsed:   event.provider,
+                        routedByJarvis: aiMode === "jarvis",
+                      }
+                    : m
+                )
+              )
             } else if (event.type === "error") {
               setMessages((prev) =>
                 prev.map((m) =>
@@ -215,8 +241,26 @@ export default function ChatPage() {
     }
   }, [activeSessionId, isTyping, selectedAgent, messages, refreshSessions, setMessages])
 
+  const handleRegenerate = useCallback(async (assistantMessageId: string) => {
+    if (!activeSessionId || isTyping) return
+    try {
+      const res  = await fetch("/api/chat/regenerate", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ session_id: activeSessionId, assistant_message_id: assistantMessageId }),
+      })
+      if (!res.ok) return
+      const ctx = await res.json() as {
+        user_message: string; history: { role: "user" | "assistant"; content: string }[]
+        session_id: string; agent_id: string | null; company_id: string
+      }
+      // Re-envia com o mesmo texto e contexto
+      void handleSend(ctx.user_message, "jarvis", [])
+    } catch { /* silent */ }
+  }, [activeSessionId, isTyping, handleSend])
+
   // Enquanto agentes carregam ou em caso de erro
-  if (agentsLoading || !selectedAgent) {
+  if (agentsLoading && !selectedAgent) {
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm" style={{ color: agentsError ? "var(--color-error, #ef4444)" : "var(--text-muted)" }}>
@@ -248,19 +292,20 @@ export default function ChatPage() {
         companyId={companyId}
         messages={messages}
         isTyping={isTyping}
-        selectedAgent={selectedAgent}
+        selectedAgent={selectedAgent as Agent | null}
         rightPanelOpen={rightPanelOpen}
         onAgentChange={handleAgentChange}
         onSend={handleSend}
+        onRegenerate={handleRegenerate}
         onToggleRightPanel={() => setRightPanelOpen((v) => !v)}
         onSourcesChanged={() => setSourcesVersion((v) => v + 1)}
-        agents={agentList}
+        agents={agentList as unknown as Agent[]}
       />
 
       <RightContextPanel
         open={rightPanelOpen}
         onClose={() => setRightPanelOpen(false)}
-        agent={selectedAgent}
+        agent={selectedAgent as Agent | null}
         sessionTitle={activeSession?.title ?? "Nova sessão"}
         sessionId={activeSessionId}
         companyId={companyId}

@@ -1,8 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server'
+﻿import { NextRequest, NextResponse } from 'next/server'
 import { createClient }      from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { getAllowedCompanyIds, isGlobalAdmin } from '@/lib/company-scope'
 import { logActivity } from '@/lib/activity-logger'
+
+export const dynamic = "force-dynamic"
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -103,7 +105,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   const action = patch.status === 'published' ? 'announcement_published'
     : patch.status === 'archived' ? 'announcement_deleted'
@@ -147,7 +149,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     .update({ deleted_at: new Date().toISOString(), status: 'archived' })
     .eq('id', id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId:    user.id,

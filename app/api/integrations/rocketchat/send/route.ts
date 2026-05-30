@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { logActivity }       from "@/lib/activity-logger"
@@ -8,6 +8,8 @@ import { parseBody, rocketchatSendSchema } from "@/lib/validators"
 import { rateLimit }            from "@/lib/rate-limit"
 
 const SEND_TIMEOUT_MS = 10_000
+
+export const dynamic = "force-dynamic"
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 

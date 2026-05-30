@@ -23,9 +23,20 @@ export interface Message {
   id: string
   role: "user" | "assistant"
   content: MessageBlock[]
-  agentName?: string
-  agentColor?: string
-  timestamp: string
+  agentName?:        string
+  agentColor?:       string
+  timestamp:         string
+  slashCommand?:     string   // ex: "copy"
+  slashAgentLabel?:  string   // ex: "Copywriter"
+  // Metadata de IA
+  modelUsed?:        string   // ex: "claude-sonnet-4-6"
+  providerUsed?:     string   // ex: "anthropic"
+  aiMode?:           string   // ex: "claude" | "jarvis"
+  routedByJarvis?:   boolean
+  // Regeneração
+  regeneratedFrom?:  string   // assistant_message_id original
+  // Anexos
+  attachmentIds?:    string[]
 }
 
 // ── Sessão s1: Criar campanha Intensivão PMPE ─────────────────────────────

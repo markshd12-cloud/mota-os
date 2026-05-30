@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin } from "@/lib/company-scope"
+
+export const dynamic = "force-dynamic"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -164,7 +166,7 @@ export async function PATCH(
     .select(SELECT_COLS)
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   return NextResponse.json({ destination: mask(data as RCDestRow) })
 }
@@ -190,7 +192,7 @@ export async function DELETE(
     .update({ deleted_at: new Date().toISOString() })
     .eq("id", id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   return NextResponse.json({ ok: true })
 }

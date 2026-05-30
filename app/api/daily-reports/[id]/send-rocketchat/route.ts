@@ -1,9 +1,11 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin }                        from "@/lib/company-scope"
 import { logActivity }                          from "@/lib/activity-logger"
 import { sanitizeReportText, companyLabel }     from "@/lib/daily-report-utils"
+
+export const dynamic = "force-dynamic"
 
 // ─── Monta mensagem final para o Rocket.Chat ──────────────────────────────────
 // Cabeçalho gerado pelo sistema; IA fornece apenas o corpo em report_text.

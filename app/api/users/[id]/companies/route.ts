@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin }     from "@/lib/company-scope"
+
+export const dynamic = "force-dynamic"
 
 // ─── GET — listar vínculos de empresa do usuário ──────────────────────────────
 
@@ -26,7 +28,7 @@ export async function GET(
     .eq("user_id", id)
     .order("created_at", { ascending: true })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   return NextResponse.json({ members: members ?? [] })
 }
@@ -63,7 +65,7 @@ export async function POST(
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   return NextResponse.json({ member: data })
 }
@@ -93,7 +95,7 @@ export async function DELETE(
     .eq("user_id", id)
     .eq("company_id", companyId)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   return NextResponse.json({ ok: true })
 }

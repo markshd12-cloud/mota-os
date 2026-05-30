@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin }     from "@/lib/company-scope"
@@ -8,6 +8,8 @@ import OpenAI    from "openai"
 import { requestCodexResponse }   from "@/lib/codex-client"
 import { getServiceAccountToken } from "@/lib/gemini-service-account"
 import { getValidGeminiToken }    from "@/lib/gemini-auth"
+
+export const dynamic = "force-dynamic"
 
 const PROVIDER_NAMES: Record<string, string> = {
   anthropic:    "Anthropic (Claude)",

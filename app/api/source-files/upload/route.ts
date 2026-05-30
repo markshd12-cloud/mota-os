@@ -1,8 +1,11 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin, getAllowedCompanyIds, ALL_SLUGS } from "@/lib/company-scope"
 import { logActivity }       from "@/lib/activity-logger"
+import { apiError, dbError as handleDbError } from "@/lib/api-error"
+
+export const dynamic = "force-dynamic"
 
 const ACCEPTED_TYPES: Record<string, string> = {
   "text/plain":                "txt",
@@ -15,6 +18,30 @@ const ACCEPTED_TYPES: Record<string, string> = {
 
 const MAX_SIZE_BYTES = 10 * 1024 * 1024 // 10 MB
 const TEXT_LIMIT     = 100_000          // Limita texto extraído a 100k chars
+
+// Magic bytes para verificação de MIME real (evita spoofing de Content-Type)
+// Compara os primeiros bytes do arquivo contra assinaturas conhecidas.
+function detectMime(bytes: Uint8Array): string | null {
+  // PDF: %PDF
+  if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+    return "application/pdf"
+  }
+  // ZIP / DOCX / XLSX (PK): bloquear — não é texto
+  if (bytes[0] === 0x50 && bytes[1] === 0x4B) return "application/zip"
+  // ELF (executável Linux)
+  if (bytes[0] === 0x7F && bytes[1] === 0x45 && bytes[2] === 0x4C && bytes[3] === 0x46) {
+    return "application/octet-stream"
+  }
+  // MZ (executável Windows / PE)
+  if (bytes[0] === 0x4D && bytes[1] === 0x5A) return "application/octet-stream"
+  // Arquivo de texto — sem assinatura binária específica
+  return null  // null = não identificado por magic bytes, aceita o Content-Type declarado
+}
+
+function isBinaryMime(mime: string | null): boolean {
+  if (!mime) return false
+  return mime === "application/zip" || mime === "application/octet-stream"
+}
 
 async function extractText(file: File): Promise<{ text: string | null; warning: string | null }> {
   const mime = file.type.split(";")[0].trim()
@@ -76,6 +103,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Arquivo muito grande. Máximo: 10 MB" }, { status: 413 })
   }
 
+  // ─── Verificação de magic bytes (anti-spoofing de MIME) ───────────────────────
+  // Lê apenas os primeiros 8 bytes para detectar executáveis e ZIPs disfarçados
+  const headerSlice = await file.slice(0, 8).arrayBuffer()
+  const realMime    = detectMime(new Uint8Array(headerSlice))
+  if (isBinaryMime(realMime)) {
+    return NextResponse.json(
+      { error: "Tipo de arquivo rejeitado: conteúdo binário não permitido." },
+      { status: 415 },
+    )
+  }
+  // PDF declarado deve ser PDF real
+  if (mime === "application/pdf" && realMime !== null && realMime !== "application/pdf") {
+    return NextResponse.json(
+      { error: "Arquivo declarado como PDF mas com conteúdo inválido." },
+      { status: 415 },
+    )
+  }
+
   // ─── Acesso à empresa ─────────────────────────────────────────────────────────
   const [admin_, allowed] = await Promise.all([
     isGlobalAdmin(user.id),
@@ -106,16 +151,17 @@ export async function POST(req: NextRequest) {
     })
 
   if (uploadError) {
-    const msgLower = uploadError.message.toLowerCase()
-    const isBucketMissing =
-      msgLower.includes("bucket") ||
-      msgLower.includes("not found") ||
-      msgLower.includes("does not exist") ||
-      msgLower.includes("no such")
-    const msg = isBucketMissing
-      ? `Bucket "knowledge-files" não encontrado. Crie o bucket no Supabase Storage com acesso privado.`
-      : uploadError.message
-    return NextResponse.json({ error: msg }, { status: 500 })
+    const isBucketMissing = uploadError.message.toLowerCase().includes("bucket") ||
+      uploadError.message.toLowerCase().includes("not found") ||
+      uploadError.message.toLowerCase().includes("does not exist") ||
+      uploadError.message.toLowerCase().includes("no such")
+    return apiError(
+      500,
+      uploadError,
+      isBucketMissing
+        ? `Bucket "knowledge-files" não encontrado. Crie o bucket no Supabase Storage com acesso privado.`
+        : undefined,
+    )
   }
 
   // ─── Salvar em source_files ───────────────────────────────────────────────────
@@ -137,7 +183,7 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (dbError) {
-    return NextResponse.json({ error: dbError.message }, { status: 500 })
+    return handleDbError(dbError, "source_files.insert")
   }
 
   void logActivity({

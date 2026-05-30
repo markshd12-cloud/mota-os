@@ -1,8 +1,10 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { logActivity }       from "@/lib/activity-logger"
 import { getAllowedCompanyIds } from "@/lib/company-scope"
+
+export const dynamic = "force-dynamic"
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -95,7 +97,7 @@ export async function PATCH(
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId:    user.id,

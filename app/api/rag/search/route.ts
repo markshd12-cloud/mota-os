@@ -1,8 +1,10 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { getAllowedCompanyIds } from "@/lib/company-scope"
 import { embedText } from "@/lib/rag/embeddings"
+
+export const dynamic = "force-dynamic"
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -44,7 +46,7 @@ export async function POST(req: NextRequest) {
       min_similarity:    body.min_similarity ?? 0.4,
     })
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
     return NextResponse.json({ results: chunks ?? [] })
   } catch (err) {

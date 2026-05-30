@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { logActivity }       from "@/lib/activity-logger"
+
+export const dynamic = "force-dynamic"
 
 // ─── GET — fontes vinculadas a uma sessão ─────────────────────────────────────
 
@@ -38,7 +40,7 @@ export async function GET(req: NextRequest) {
     `)
     .eq("session_id", sessionId)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   // Filtra apenas fontes da mesma empresa que a sessão (dupla segurança)
   const filtered = (data ?? []).filter(
@@ -88,7 +90,7 @@ export async function POST(req: NextRequest) {
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId:    user.id,
@@ -134,7 +136,7 @@ export async function DELETE(req: NextRequest) {
     .eq("session_id", session_id)
     .eq("source_id", source_id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId:    user.id,

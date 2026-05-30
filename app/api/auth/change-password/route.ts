@@ -1,6 +1,8 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }   from "@/lib/supabase-server"
 import { logActivity }    from "@/lib/activity-logger"
+
+export const dynamic = "force-dynamic"
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()

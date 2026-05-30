@@ -1,9 +1,11 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin, getAllowedCompanyIds } from "@/lib/company-scope"
 import { logActivity }       from "@/lib/activity-logger"
 import { mapProjectFile }    from "@/lib/project-helpers"
+
+export const dynamic = "force-dynamic"
 
 type Ctx = { params: Promise<{ fileId: string }> }
 
@@ -57,7 +59,7 @@ export async function DELETE(_req: NextRequest, { params }: Ctx) {
   await admin.storage.from(BUCKET).remove([file.storage_path]).catch(() => null)
 
   const { error } = await admin.from("project_files").delete().eq("id", fileId)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId: user.id, eventType: "settings",

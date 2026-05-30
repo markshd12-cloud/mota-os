@@ -1,9 +1,12 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { streamChat }        from "@/lib/ai-service"
 import { buildWorkflowPrompt } from "@/lib/workflow-prompts"
 import { workflows }           from "@/lib/mocks/workflows"
+import { rateLimit, RATE_LIMITS, rateLimitJsonResponse } from "@/lib/rate-limit"
+
+export const dynamic = "force-dynamic"
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -23,6 +26,10 @@ export async function POST(_req: NextRequest, { params }: Params) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })
+
+  // ─── Rate limiting ────────────────────────────────────────────────────────
+  const rl = rateLimit(`automation:${user.id}`, RATE_LIMITS.automation)
+  if (!rl.ok) return rateLimitJsonResponse(rl.resetAt)
 
   const admin = createAdminClient()
 

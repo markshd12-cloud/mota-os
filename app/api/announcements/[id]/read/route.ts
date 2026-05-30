@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
+﻿import { NextRequest, NextResponse } from 'next/server'
 import { createClient }      from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { logActivity } from '@/lib/activity-logger'
+
+export const dynamic = "force-dynamic"
 
 type Params = { params: Promise<{ id: string }> }
 

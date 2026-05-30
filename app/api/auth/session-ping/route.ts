@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { logActivity }       from "@/lib/activity-logger"
+
+export const dynamic = "force-dynamic"
 
 // Nunca bloqueia o usuário — sempre retorna 200 mesmo em erro
 export async function POST(req: NextRequest) {

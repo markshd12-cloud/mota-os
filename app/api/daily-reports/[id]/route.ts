@@ -1,8 +1,10 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin } from "@/lib/company-scope"
 import { logActivity }   from "@/lib/activity-logger"
+
+export const dynamic = "force-dynamic"
 
 async function fetchReport(admin: ReturnType<typeof createAdminClient>, id: string) {
   const { data, error } = await admin
@@ -88,7 +90,7 @@ export async function PATCH(
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   return NextResponse.json({ report: data })
 }

@@ -1,6 +1,8 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase-server"
 import { logActivity } from "@/lib/activity-logger"
+
+export const dynamic = "force-dynamic"
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -97,7 +99,7 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     .eq("id", id)
     .is("deleted_at", null)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId: user.id, eventType: "chat", action: "Sessão excluída",

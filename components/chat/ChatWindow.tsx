@@ -12,6 +12,7 @@ import { RocketChatSendModal } from "@/components/integrations/RocketChatSendMod
 import { useCompany }  from "@/components/providers/CompanyProvider"
 import type { Agent } from "@/lib/mocks/agents"
 import type { Message } from "@/lib/mocks/messages"
+import type { AIMode } from "@/lib/ai/model-registry"
 
 const quickPrompts = [
   "Criar campanha de leads para a CPPEM",
@@ -29,10 +30,11 @@ interface ChatWindowProps {
   companyId?:       string
   messages:         Message[]
   isTyping:         boolean
-  selectedAgent:    Agent
+  selectedAgent?:   Agent | null
   rightPanelOpen:   boolean
   onAgentChange:    (a: Agent) => void
-  onSend:           (text: string) => void
+  onSend:           (text: string, aiMode: AIMode, attachmentIds: string[]) => void
+  onRegenerate?:    (messageId: string) => void
   onToggleRightPanel: () => void
   onSourcesChanged?: () => void
   agents?:          Agent[]
@@ -68,6 +70,7 @@ export function ChatWindow({
   rightPanelOpen,
   onAgentChange,
   onSend,
+  onRegenerate,
   onToggleRightPanel,
   onSourcesChanged,
   agents,
@@ -281,7 +284,7 @@ export function ChatWindow({
             {sessionTitle ?? "Nova sessão"}
           </p>
 
-          {sessionId && (
+          {sessionId && selectedAgent && (
             <div className="flex items-center gap-2 mt-0.5">
               <span
                 className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
@@ -366,7 +369,11 @@ export function ChatWindow({
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto">
         {isEmpty ? (
-          <EmptyState onPrompt={onSend} agentName={selectedAgent.shortName} agentColor={selectedAgent.color} />
+          <EmptyState
+            onPrompt={(text) => onSend(text, "jarvis", [])}
+            agentName={selectedAgent?.shortName ?? "Jarvis"}
+            agentColor={selectedAgent?.color ?? "#16a34a"}
+          />
         ) : (
           <div className="px-6 py-6 space-y-6 max-w-4xl mx-auto">
             {messages.map((msg, i) => (
@@ -375,14 +382,15 @@ export function ChatWindow({
                 message={msg}
                 index={i}
                 onSendToRocket={msg.role === "assistant" ? handleSendToRocket : undefined}
+                onRegenerate={msg.role === "assistant" ? onRegenerate : undefined}
               />
             ))}
 
             <AnimatePresence>
               {isTyping && (
                 <TypingIndicator
-                  agentName={selectedAgent.name}
-                  agentColor={selectedAgent.color}
+                  agentName={selectedAgent?.name ?? "Jarvis"}
+                  agentColor={selectedAgent?.color ?? "#16a34a"}
                 />
               )}
             </AnimatePresence>

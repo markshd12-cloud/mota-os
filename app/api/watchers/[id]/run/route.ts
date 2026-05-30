@@ -1,10 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server'
+﻿import { NextRequest, NextResponse } from 'next/server'
 import { createClient }      from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { getAllowedCompanyIds, isGlobalAdmin } from '@/lib/company-scope'
 import { logActivity } from '@/lib/activity-logger'
 import { evaluateWatcher, type WatcherType } from '@/lib/watchers/evaluate-watcher'
 import { calcNextRunAt, type WatcherFrequency } from '@/lib/watchers/schedule'
+
+export const dynamic = "force-dynamic"
 
 type Params = { params: Promise<{ id: string }> }
 

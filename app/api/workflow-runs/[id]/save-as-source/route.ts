@@ -1,8 +1,10 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { getAllowedCompanyIds, getCurrentCompany } from "@/lib/company-scope"
 import { logActivity }       from "@/lib/activity-logger"
+
+export const dynamic = "force-dynamic"
 
 export async function POST(
   req: NextRequest,
@@ -78,7 +80,7 @@ export async function POST(
     .single()
 
   if (sourceErr) {
-    return NextResponse.json({ error: sourceErr.message }, { status: 500 })
+    return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
   }
 
   void logActivity({

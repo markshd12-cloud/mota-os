@@ -56,7 +56,7 @@ function mapRow(row: any): UISession {
   return {
     id:           row.id,
     title:        row.title ?? "Nova conversa",
-    agentName:    agent?.short_name ?? "IA",
+    agentName:    agent?.short_name ?? "",   // "" = sem agente (não usar "IA" como fallback)
     agentColor:   agent?.color     ?? "#6366f1",
     company:      COMPANY_NAME[row.company_id  as string] ?? "Grupo Mota",
     companyShort: COMPANY_SHORT[row.company_id as string] ?? "Grupo",

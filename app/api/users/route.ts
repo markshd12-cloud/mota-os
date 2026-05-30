@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin, getAllowedCompanyIds } from "@/lib/company-scope"
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   }
 
   const { data: profiles, error: profErr } = await profileQuery
-  if (profErr) return NextResponse.json({ error: profErr.message }, { status: 500 })
+  if (profErr) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   const { data: members } = await admin
     .from("company_members")

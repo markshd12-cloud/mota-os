@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useCallback } from "react"
 import { motion } from "framer-motion"
-import { Check, Copy, CheckSquare, Square, Zap, Rocket } from "lucide-react"
+import { Check, Copy, CheckSquare, Square, Zap, Rocket, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Message, MessageBlock, ChecklistBlock } from "@/lib/mocks/messages"
+import { modelLabel } from "@/lib/ai/model-registry"
 
 function extractMessageText(content: MessageBlock[]): string {
   return content
@@ -25,11 +26,21 @@ interface ChatMessageProps {
   message:           Message
   index:             number
   onSendToRocket?:   (text: string) => void
+  onRegenerate?:     (messageId: string) => void
 }
 
-export function ChatMessage({ message, index, onSendToRocket }: ChatMessageProps) {
+export function ChatMessage({ message, index, onSendToRocket, onRegenerate }: ChatMessageProps) {
   const isUser = message.role === "user"
   const [hovered, setHovered] = useState(false)
+  const [copied,  setCopied]  = useState(false)
+
+  const handleCopy = useCallback(() => {
+    const text = extractMessageText(message.content)
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }).catch(() => {})
+  }, [message.content])
 
   return (
     <motion.div
@@ -57,13 +68,23 @@ export function ChatMessage({ message, index, onSendToRocket }: ChatMessageProps
       <div className={cn("flex flex-col gap-2 max-w-[75%]", isUser && "items-end")}>
         {/* Agent label */}
         {!isUser && message.agentName && (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span
               className="text-[11px] font-semibold"
               style={{ color: message.agentColor ?? "#16a34a" }}
             >
               {message.agentName}
             </span>
+            {/* Slash command badge */}
+            {message.slashCommand && (
+              <span
+                className="text-[9px] font-mono px-1.5 py-0.5 rounded-full font-semibold"
+                style={{ background: "rgba(139,92,246,0.12)", color: "#a78bfa" }}
+              >
+                /{message.slashCommand}
+                {message.slashAgentLabel && ` · ${message.slashAgentLabel}`}
+              </span>
+            )}
             <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
               {message.timestamp}
             </span>
@@ -84,20 +105,63 @@ export function ChatMessage({ message, index, onSendToRocket }: ChatMessageProps
           ))}
         </div>
 
-        {/* Rocket.Chat button — só em mensagens do assistente */}
-        {!isUser && onSendToRocket && (
-          <motion.button
+        {/* Metadata do modelo — badge discreta */}
+        {!isUser && (message.modelUsed || message.providerUsed) && (
+          <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+            <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+              {message.routedByJarvis ? "Jarvis → " : ""}
+              {message.modelUsed && message.providerUsed
+                ? modelLabel(message.providerUsed, message.modelUsed)
+                : (message.modelUsed ?? message.providerUsed)}
+            </span>
+          </div>
+        )}
+
+        {/* Ações do assistente — aparecem no hover */}
+        {!isUser && (
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: hovered ? 1 : 0 }}
             transition={{ duration: 0.15 }}
-            onClick={() => onSendToRocket(extractMessageText(message.content))}
-            className="flex items-center gap-1.5 mt-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors border hover:bg-orange-500/10 hover:border-orange-500/30"
-            style={{ color: "var(--text-muted)", borderColor: "var(--border-color)" }}
-            title="Enviar para Rocket.Chat"
+            className="flex items-center gap-1 mt-1 flex-wrap"
           >
-            <Rocket size={11} className="text-orange-500" />
-            Enviar ao Rocket.Chat
-          </motion.button>
+            {/* Copiar */}
+            <button
+              onClick={handleCopy}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] border transition-colors hover:bg-[var(--bg-hover)]"
+              style={{ color: copied ? "#16a34a" : "var(--text-muted)", borderColor: "var(--border-color)" }}
+              title="Copiar resposta"
+            >
+              {copied ? <Check size={11} /> : <Copy size={11} />}
+              {copied ? "Copiado!" : "Copiar"}
+            </button>
+
+            {/* Gerar novamente */}
+            {onRegenerate && (
+              <button
+                onClick={() => onRegenerate(message.id)}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] border transition-colors hover:bg-[var(--bg-hover)]"
+                style={{ color: "var(--text-muted)", borderColor: "var(--border-color)" }}
+                title="Gerar novamente"
+              >
+                <RefreshCw size={11} />
+                Gerar novamente
+              </button>
+            )}
+
+            {/* Rocket.Chat */}
+            {onSendToRocket && (
+              <button
+                onClick={() => onSendToRocket(extractMessageText(message.content))}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] border transition-colors hover:bg-orange-500/10 hover:border-orange-500/30"
+                style={{ color: "var(--text-muted)", borderColor: "var(--border-color)" }}
+                title="Enviar para Rocket.Chat"
+              >
+                <Rocket size={11} className="text-orange-500" />
+                Rocket.Chat
+              </button>
+            )}
+          </motion.div>
         )}
 
         {/* Timestamp for user */}

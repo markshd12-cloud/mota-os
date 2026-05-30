@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin, getAllowedCompanyIds, getCurrentCompany } from "@/lib/company-scope"
@@ -42,12 +42,12 @@ export async function GET(req: NextRequest) {
 
     if (dateParam) {
       const { data, error } = await query.eq("report_date", dateParam)
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
       return NextResponse.json({ reports: data ?? [] })
     }
 
     const { data, error } = await query
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
     return NextResponse.json({ reports: data ?? [] })
   }
 
@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
     .is("deleted_at", null)
     .maybeSingle()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   return NextResponse.json({ report: data ?? null, date: today, company_id: company })
 }
@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId:    user.id,

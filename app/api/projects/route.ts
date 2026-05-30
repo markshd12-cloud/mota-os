@@ -1,9 +1,11 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin, getAllowedCompanyIds, ALL_SLUGS } from "@/lib/company-scope"
 import { logActivity }       from "@/lib/activity-logger"
 import { mapProject }        from "@/lib/project-helpers"
+
+export const dynamic = "force-dynamic"
 
 // ─── GET — listar projetos da empresa ────────────────────────────────────────
 
@@ -59,7 +61,7 @@ export async function GET(req: NextRequest) {
     data = data.filter((r: Record<string, unknown>) => !r.deleted_at)
   }
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   return NextResponse.json((data ?? []).map(mapProject))
 }
@@ -155,7 +157,7 @@ export async function POST(req: NextRequest) {
     ;({ data, error } = await admin.from("projects").insert(insertBase).select().single())
   }
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId:    user.id,
@@ -198,7 +200,7 @@ export async function DELETE(req: NextRequest) {
     const fallback = await admin.from("projects").update({ status: "archived" }).eq("id", body.id)
     error = fallback.error
   }
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId: user.id, eventType: "settings",

@@ -1,9 +1,11 @@
-import { NextRequest } from "next/server"
+﻿import { NextRequest } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { streamChat }        from "@/lib/ai-service"
 import { buildWorkflowPrompt, companyToSlug } from "@/lib/workflow-prompts"
 import type { WorkflowStep } from "@/lib/workflow-types"
+
+export const dynamic = "force-dynamic"
 
 function sse(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`)

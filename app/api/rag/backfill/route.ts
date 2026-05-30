@@ -1,8 +1,10 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin } from "@/lib/company-scope"
 import { indexSource } from "@/lib/rag/index-source"
+
+export const dynamic = "force-dynamic"
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()

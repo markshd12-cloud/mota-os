@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin, getAllowedCompanyIds } from "@/lib/company-scope"
@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await query
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   return NextResponse.json({ destinations: (data ?? []).map(mask) })
 }
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
     .select("id,name,type,mode,webhook_url,base_url,user_id,auth_token,channel,alias,avatar,status,is_default,company_id,created_by,created_at,updated_at,metadata")
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   return NextResponse.json({ destination: mask(data as RCDestRow) }, { status: 201 })
 }

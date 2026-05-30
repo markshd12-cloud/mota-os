@@ -1,6 +1,8 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
+
+export const dynamic = "force-dynamic"
 
 const EVENT_TYPES = ["chat", "workflow", "auto", "source", "watcher", "auth", "settings", "api"] as const
 
@@ -51,7 +53,7 @@ export async function GET(req: NextRequest) {
 
   const { data: logs, error } = await query
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   const rows = logs ?? []
 

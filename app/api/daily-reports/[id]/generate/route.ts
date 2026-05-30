@@ -1,10 +1,12 @@
-import { NextRequest, NextResponse } from "next/server"
+﻿import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { streamChat }          from "@/lib/ai-service"
 import { isGlobalAdmin }       from "@/lib/company-scope"
 import { logActivity }         from "@/lib/activity-logger"
 import { sanitizeReportText }  from "@/lib/daily-report-utils"
+
+export const dynamic = "force-dynamic"
 
 // ─── Fallback local (quando IA falhar) ────────────────────────────────────────
 
@@ -126,7 +128,7 @@ Gere apenas o corpo do texto, sem título, sem cabeçalho e sem assinatura.`
     .select()
     .single()
 
-  if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
+  if (updateErr) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
   void logActivity({
     userId:    user.id,

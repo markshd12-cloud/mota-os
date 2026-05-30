@@ -1,9 +1,15 @@
-import { NextRequest } from "next/server"
+﻿import { NextRequest } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { streamChat, type AIProvider } from "@/lib/ai-service"
 import { logActivity }                 from "@/lib/activity-logger"
 import { embedText }                   from "@/lib/rag/embeddings"
+import { rateLimit, RATE_LIMITS, rateLimitSseResponse, isBodyTooLarge, BODY_LIMITS } from "@/lib/rate-limit"
+import { getAllowedCompanyIds, isGlobalAdmin, getCurrentCompany } from "@/lib/company-scope"
+import { parseSlashCommand } from "@/lib/slash-agents"
+import { resolveAIMode, isAIMode, modelLabel } from "@/lib/ai/model-registry"
+
+export const dynamic = "force-dynamic"
 
 // ─── SSE helpers ──────────────────────────────────────────────────────────────
 
@@ -14,16 +20,35 @@ function sse(data: object): Uint8Array {
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  const body = await req.json() as {
-    messages:     { role: "user" | "assistant"; content: string }[]
-    system?:      string
-    session_id?:  string | null
-    agent_id?:    string | null
-    user_message: string
-    company_id?:  string
-    provider?:    AIProvider
-    model?:       string
+  // Limite generoso para suportar /summarize — checagem por comando acontece depois
+  if (isBodyTooLarge(req, BODY_LIMITS.summarize)) {
+    return new Response(
+      `data: ${JSON.stringify({ type: "error", error: "O texto enviado é muito grande. Divida em partes menores ou envie como fonte/documento para resumir." })}\n\n`,
+      { status: 413, headers: { "Content-Type": "text/event-stream" } },
+    )
   }
+
+  const body = await req.json() as {
+    messages:          { role: "user" | "assistant"; content: string }[]
+    system?:           string
+    session_id?:       string | null
+    agent_id?:         string | null
+    user_message:      string
+    company_id?:       string
+    provider?:         AIProvider
+    model?:            string
+    selected_ai_mode?: string
+    attachment_ids?:   string[]
+  }
+
+  // ─── Sanitização: só aceitar roles válidos no histórico ──────────────────
+  // Impede role injection (ex: mensagem com role "system" vinda do cliente)
+  const safeMessages = (body.messages ?? [])
+    .filter((m): m is { role: "user" | "assistant"; content: string } =>
+      (m.role === "user" || m.role === "assistant") &&
+      typeof m.content === "string"
+    )
+    .map(m => ({ role: m.role, content: m.content.slice(0, 32_000) }))
 
   // ─── Auth (client Supabase com cookies) ──────────────────────────────────
   const supabase = await createClient()
@@ -36,14 +61,95 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // ─── Configuração do agente ───────────────────────────────────────────────
+  // ─── Rate limiting ────────────────────────────────────────────────────────
+  const rl = rateLimit(`chat:${user.id}`, RATE_LIMITS.chat)
+  if (!rl.ok) return rateLimitSseResponse(rl.resetAt)
+
+  // ─── Validação de acesso: company_id e agent_id ───────────────────────────
   const admin = createAdminClient()
+
+  const [isAdmin, allowedCompanies] = await Promise.all([
+    isGlobalAdmin(user.id),
+    getAllowedCompanyIds(user.id),
+  ])
+
+  // ── Slash command orchestration ───────────────────────────────────────────
+  type SlashAgentRow = { id: string; command: string; label: string; system_prompt: string; model: string; provider: string }
+  const slashParsed = parseSlashCommand(body.user_message)
+  let slashAgent: SlashAgentRow | null = null
+
+  if (slashParsed) {
+    const { data: sa } = await admin
+      .from("slash_agents")
+      .select("id, command, label, system_prompt, model, provider, admin_only")
+      .eq("command", slashParsed.command)
+      .eq("active", true)
+      .maybeSingle()
+
+    if (sa && (!sa.admin_only || isAdmin)) {
+      slashAgent = sa as unknown as SlashAgentRow
+    }
+  }
+
+  // Valida company_id: deve pertencer às empresas do usuário
+  const requestedCompany = body.company_id ?? null
+  let resolvedCompany: string
+
+  if (requestedCompany) {
+    if (!isAdmin && !(allowedCompanies as string[]).includes(requestedCompany)) {
+      return new Response(
+        `data: ${JSON.stringify({ type: "error", error: "Sem acesso a esta empresa." })}\n\n`,
+        { status: 403, headers: { "Content-Type": "text/event-stream" } },
+      )
+    }
+    resolvedCompany = requestedCompany
+  } else {
+    resolvedCompany = await getCurrentCompany(user.id)
+  }
+
+  // Valida agent_id: agente deve existir e pertencer a uma empresa acessível
+  if (body.agent_id) {
+    const { data: agentRow } = await admin
+      .from("agents")
+      .select("id, companies, status")
+      .eq("id", body.agent_id)
+      .single()
+
+    if (!agentRow || agentRow.status !== "active") {
+      return new Response(
+        `data: ${JSON.stringify({ type: "error", error: "Agente não encontrado." })}\n\n`,
+        { status: 404, headers: { "Content-Type": "text/event-stream" } },
+      )
+    }
+
+    if (!isAdmin) {
+      const agentCompanies = (agentRow.companies as string[]) ?? []
+      const accessible = agentCompanies.length === 0
+        || agentCompanies.some(c => (allowedCompanies as string[]).includes(c))
+      if (!accessible) {
+        return new Response(
+          `data: ${JSON.stringify({ type: "error", error: "Sem acesso a este agente." })}\n\n`,
+          { status: 403, headers: { "Content-Type": "text/event-stream" } },
+        )
+      }
+    }
+  }
+
+  // ─── Configuração do agente ───────────────────────────────────────────────
+
+  // Modelos permitidos para usuários não-admin sem agente configurado.
+  // Admin e agentes configurados no banco não têm restrição.
+  const ALLOWED_FREE_MODELS: Record<string, string[]> = {
+    anthropic: ["claude-haiku-4-5", "claude-haiku-4-5-20251001", "claude-sonnet-4-6"],
+    openai:    ["gpt-4o-mini", "gpt-4o-mini-2024-07-18", "gpt-4o"],
+  }
 
   let provider: AIProvider = body.provider ?? "anthropic"
   let model:    string | undefined = body.model
   let system:   string | undefined = body.system
 
   if (body.agent_id) {
+    // Modelo vem do banco — confiável, sem restrição de whitelist
     const { data: cfg } = await admin
       .from("agent_model_configs")
       .select("provider, model_id, system_prompt")
@@ -60,6 +166,71 @@ export async function POST(req: NextRequest) {
     provider = cfg.provider as AIProvider
     model    = cfg.model_id
     if (cfg.system_prompt) system = cfg.system_prompt
+  } else if (!isAdmin) {
+    // Sem agente: valida provider e modelo contra whitelist
+    const allowedProviders = Object.keys(ALLOWED_FREE_MODELS) as AIProvider[]
+    if (!allowedProviders.includes(provider)) provider = "anthropic"
+
+    const allowedModels = ALLOWED_FREE_MODELS[provider] ?? []
+    if (model && !allowedModels.includes(model)) {
+      return new Response(
+        `data: ${JSON.stringify({ type: "error", error: `Modelo não permitido: ${model}.` })}\n\n`,
+        { status: 403, headers: { "Content-Type": "text/event-stream" } },
+      )
+    }
+  }
+
+  // ── selected_ai_mode: sobrescreve provider/model se não for "jarvis" ────────
+  let routedByJarvis = true
+  const rawMode = body.selected_ai_mode?.toLowerCase()
+  if (rawMode && rawMode !== "jarvis" && isAIMode(rawMode)) {
+    const resolved = resolveAIMode(rawMode)
+    if ("error" in resolved) {
+      return new Response(
+        `data: ${JSON.stringify({ type: "error", error: resolved.error })}\n\n`,
+        { status: 422, headers: { "Content-Type": "text/event-stream" } },
+      )
+    }
+    provider       = resolved.provider as AIProvider
+    model          = resolved.model
+    routedByJarvis = false
+  }
+
+  // Slash agent: sobrescreve provider/model APENAS se no modo jarvis (automático)
+  // Se usuário escolheu IA manual, respeitamos essa escolha mas injetamos o system_prompt do slash agent
+  if (slashAgent) {
+    if (routedByJarvis) {
+      provider = slashAgent.provider as AIProvider
+      model    = slashAgent.model
+    }
+    system = slashAgent.system_prompt + (system ? `\n\n${system}` : "")
+  }
+
+  // ── Guard de tamanho por comando (chat normal tem limite menor) ──────────
+  {
+    const totalChars = safeMessages.reduce((s, m) => s + m.content.length, 0)
+    const isSummarize = slashAgent?.command === "summarize"
+    const charLimit   = isSummarize ? 200_000 : 80_000
+    if (totalChars > charLimit) {
+      return new Response(
+        `data: ${JSON.stringify({ type: "error", error: isSummarize
+          ? "O texto enviado é muito grande para o Resumidor. Divida em partes menores."
+          : "O texto enviado é muito grande. Use /summarize para textos longos ou envie como fonte de conhecimento."
+        })}\n\n`,
+        { status: 413, headers: { "Content-Type": "text/event-stream" } },
+      )
+    }
+  }
+
+  // ── Slash: remove /comando da última mensagem antes de enviar à IA ────────
+  if (slashAgent && slashParsed && safeMessages.length > 0) {
+    const last = safeMessages[safeMessages.length - 1]
+    if (last.role === "user") {
+      safeMessages[safeMessages.length - 1] = {
+        ...last,
+        content: slashParsed.query || last.content,
+      }
+    }
   }
 
   // ─── Sessão ───────────────────────────────────────────────────────────────
@@ -72,7 +243,7 @@ export async function POST(req: NextRequest) {
       .insert({
         user_id:    user.id,
         agent_id:   body.agent_id ?? null,
-        company_id: body.company_id ?? "grupo",
+        company_id: resolvedCompany,
         title,
         pinned:     false,
         archived:   false,
@@ -115,7 +286,7 @@ export async function POST(req: NextRequest) {
             const { data: chunks } = await admin.rpc("match_knowledge_chunks", {
               query_embedding:   `[${queryEmbedding.join(",")}]`,
               match_count:       8,
-              filter_company:    body.company_id ?? null,
+              filter_company:    resolvedCompany,
               filter_agent_id:   null,
               filter_source_ids: indexedIds,
               min_similarity:    0.35,
@@ -134,7 +305,7 @@ export async function POST(req: NextRequest) {
                 action:    "chat_rag_injected",
                 detail:    `${parts.length} trecho(s) semântico(s)`,
                 sessionId: sid as string,
-                companyId: body.company_id,
+                companyId: resolvedCompany,
               })
             }
           } catch (ragErr) {
@@ -175,6 +346,39 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ─── Contexto de anexos ───────────────────────────────────────────────────
+  if (body.attachment_ids && body.attachment_ids.length > 0) {
+    try {
+      const { data: attachRows } = await admin
+        .from("chat_attachments")
+        .select("id, file_name, file_type, mime_type, extracted_text, metadata")
+        .in("id", body.attachment_ids)
+        .eq("user_id", user.id)  // segurança: só do próprio usuário
+        .is("deleted_at", null)
+
+      if (attachRows && attachRows.length > 0) {
+        const attachCtx: string[] = []
+        for (const att of attachRows) {
+          if (att.extracted_text) {
+            const header = `=== Arquivo anexado: ${att.file_name} (${att.file_type}) ===`
+            attachCtx.push(`${header}\n${att.extracted_text.slice(0, 40_000)}`)
+          } else if (att.file_type === "image") {
+            attachCtx.push(`=== Imagem anexada: ${att.file_name} ===\n[Imagem enviada pelo usuário — análise de visão disponível em providers compatíveis]`)
+          } else {
+            const meta = (att.metadata as Record<string, unknown>) ?? {}
+            const warn = meta.warning as string | undefined
+            attachCtx.push(`=== Arquivo anexado: ${att.file_name} ===\n${warn ?? "Conteúdo não disponível para extração automática."}`)
+          }
+        }
+        if (attachCtx.length > 0) {
+          system = (system ?? "") + `\n\nANEXOS DO USUÁRIO:\n${attachCtx.join("\n\n")}\n`
+        }
+      }
+    } catch (attachErr) {
+      console.warn("[chat] Erro ao carregar anexos:", attachErr)
+    }
+  }
+
   // ─── Salvar mensagem do usuário ───────────────────────────────────────────
   {
     const { error: e } = await admin.from("messages").insert({
@@ -202,100 +406,164 @@ export async function POST(req: NextRequest) {
   const readable = new ReadableStream({
     async start(controller) {
       let accumulated = ""
+      let doneSent    = false
+
+      // Bloco de metadados que vai para `blocks` jsonb (persistido no banco)
+      const msgBlocks = {
+        slashCommand:    slashAgent?.command    ?? null,
+        slashAgentLabel: slashAgent?.label      ?? null,
+        aiMode:          rawMode                ?? "jarvis",
+        routedByJarvis,
+      }
+
+      // ── Helper: salva mensagem do assistente no banco ──────────────────────
+      async function saveAssistant(
+        content:    string,
+        status:     "done" | "error",
+        errMsg?:    string,
+        modelUsed?: string,
+        provUsed?:  string,
+      ) {
+        if (!content) return  // nunca salva vazio
+        const row = {
+          session_id:    finalSid,
+          role:          "assistant" as const,
+          content,
+          blocks:        msgBlocks,        // metadados de IA persistidos
+          agent_id:      body.agent_id ?? null,
+          status,
+          error_message: errMsg      ?? null,
+          model_used:    modelUsed   ?? null,
+          provider:      provUsed    ?? null,
+        }
+        const { error: e1 } = await admin.from("messages").insert(row)
+        if (e1) {
+          // Fallback: sem colunas extras (status/error_message podem não existir)
+          await admin.from("messages").insert({
+            session_id: finalSid,
+            role:       "assistant",
+            content,
+            blocks:     msgBlocks,
+            agent_id:   body.agent_id ?? null,
+          }).then(({ error: e2 }) => {
+            if (e2) console.error("[chat] assistant save fallback failed:", e2.message)
+          })
+        }
+      }
+
+      // ── Helper: emite done e fecha ─────────────────────────────────────────
+      function emitDone(content: string, model: string, provider: string, usage: object, error: string | null) {
+        if (doneSent) return
+        doneSent = true
+        controller.enqueue(sse({ type: "done", session_id: finalSid, content, model, provider, usage, error }))
+      }
+
+      // Sinaliza ao cliente qual agente vai responder
+      if (slashAgent) {
+        controller.enqueue(sse({ type: "agent_routed", command: slashAgent.command, label: slashAgent.label }))
+      }
 
       try {
-        for await (const chunk of streamChat({
-          messages: body.messages,
-          system,
-          provider,
-          model,
-        })) {
+        for await (const chunk of streamChat({ messages: safeMessages, system, provider, model })) {
+
           if (!chunk.done) {
-            // Texto parcial — AIChunkDelta
+            // Delta parcial
             accumulated += chunk.text
             controller.enqueue(sse({ type: "delta", text: chunk.text }))
 
           } else if ("error" in chunk) {
-            // Erro do provedor — AIChunkError
-            controller.enqueue(sse({ type: "error", error: chunk.error }))
-            const { error: eErr } = await admin.from("messages").insert({
-              session_id:    finalSid,
-              role:          "assistant",
-              content:       "",
-              agent_id:      body.agent_id ?? null,
-              status:        "error",
-              error_message: chunk.error,
-            })
-            if (eErr) {
-              await admin.from("messages").insert({
-                session_id: finalSid,
-                role:       "assistant",
-                content:    "",
-                agent_id:   body.agent_id ?? null,
+            // Erro do provedor AI
+            const errMsg = chunk.error ?? "Erro ao gerar resposta"
+            console.error("[chat] AI provider error:", errMsg.slice(0, 200))
+
+            // Mostra erro ao usuário como mensagem vísivel
+            const displayMsg = `⚠️ ${errMsg.slice(0, 300)}`
+            controller.enqueue(sse({ type: "error", error: errMsg }))
+
+            if (slashAgent) {
+              void admin.from("agent_executions").insert({
+                user_id: user.id, session_id: finalSid, company_id: resolvedCompany,
+                command: `/${slashAgent.command}`, slash_agent_id: slashAgent.id,
+                routing_reason: "slash_command", status: "failed",
+                error_message: errMsg.slice(0, 500), finished_at: new Date().toISOString(),
               })
             }
+
+            await saveAssistant(displayMsg, "error", errMsg)
+            emitDone(displayMsg, provider, provider, { input_tokens: 0, output_tokens: 0 }, errMsg)
 
           } else {
-            // Fim com sucesso — AIChunkDone
-            const { error: saveErr } = await admin.from("messages").insert({
-              session_id:    finalSid,
-              role:          "assistant",
-              content:       accumulated,
-              agent_id:      body.agent_id ?? null,
-              model_used:    chunk.model,
-              provider:      chunk.provider,
-              input_tokens:  chunk.usage.input_tokens,
-              output_tokens: chunk.usage.output_tokens,
-              status:        "done",
-            })
+            // Fim com sucesso
+            const usedModel    = chunk.model
+            const usedProvider = chunk.provider
+            const usage        = chunk.usage
 
-            if (saveErr) {
-              // status/provider podem não existir — fallback com colunas base
-              console.warn("[chat] assistant msg insert failed, trying base:", saveErr.message)
-              const { error: baseErr } = await admin.from("messages").insert({
-                session_id:    finalSid,
-                role:          "assistant",
-                content:       accumulated,
-                agent_id:      body.agent_id ?? null,
-                model_used:    chunk.model,
-                input_tokens:  chunk.usage.input_tokens,
-                output_tokens: chunk.usage.output_tokens,
-              })
-              if (baseErr) {
-                console.error("[chat] assistant msg base insert also failed:", baseErr.message)
-              }
+            // Fallback se IA retornou vazio
+            if (!accumulated.trim()) {
+              const fallback = slashAgent
+                ? "Não consegui gerar uma resposta para esse comando. Tente reduzir o texto ou reformular o pedido."
+                : "Não foi possível gerar uma resposta. Tente novamente."
+              accumulated = fallback
+              // Emite o fallback como delta para aparecer no chat
+              controller.enqueue(sse({ type: "delta", text: fallback }))
             }
+
+            await saveAssistant(accumulated, "done", undefined, usedModel, usedProvider)
 
             void logActivity({
               userId:    user.id,
               eventType: "chat",
-              action:    "Mensagem enviada",
-              detail:    `${chunk.provider} / ${chunk.model}`,
+              action:    slashAgent ? `/${slashAgent.command} — ${slashAgent.label}` : "Mensagem enviada",
+              detail:    `${modelLabel(usedProvider, usedModel)} (${routedByJarvis ? "Jarvis automático" : rawMode ?? "manual"})`,
               metadata:  {
-                session_id:    finalSid,
-                agent_id:      body.agent_id ?? null,
-                provider:      chunk.provider,
-                model:         chunk.model,
-                input_tokens:  chunk.usage.input_tokens,
-                output_tokens: chunk.usage.output_tokens,
+                session_id:       finalSid,
+                agent_id:         body.agent_id ?? null,
+                slash_command:    slashAgent?.command ?? null,
+                selected_ai_mode: rawMode ?? "jarvis",
+                routed_by_jarvis: routedByJarvis,
+                provider:         usedProvider,
+                model:            usedModel,
+                input_tokens:     usage.input_tokens,
+                output_tokens:    usage.output_tokens,
               },
               sessionId: finalSid,
             })
 
-            controller.enqueue(sse({
-              type:       "done",
-              session_id: finalSid,
-              content:    accumulated,
-              model:      chunk.model,
-              provider:   chunk.provider,
-              usage:      chunk.usage,
-              error:      null,
-            }))
+            if (slashAgent) {
+              void admin.from("agent_executions").insert({
+                user_id: user.id, session_id: finalSid, company_id: resolvedCompany,
+                command: `/${slashAgent.command}`, slash_agent_id: slashAgent.id,
+                model_used: usedModel, provider_used: usedProvider,
+                used_sources: (system ?? "").includes("FONTES DE CONHECIMENTO"),
+                routing_reason: "slash_command", status: "done",
+                input_tokens: usage.input_tokens, output_tokens: usage.output_tokens,
+                finished_at: new Date().toISOString(),
+              })
+            }
+
+            emitDone(accumulated, usedModel, usedProvider, usage, null)
           }
         }
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Erro interno no servidor"
-        controller.enqueue(sse({ type: "error", error: msg }))
+        // Erro de rede, timeout ou exceção inesperada
+        const raw = err instanceof Error ? err.message : "Erro interno"
+        console.error("[chat] stream exception:", raw.slice(0, 200))
+
+        const userMsg = "Ocorreu um erro ao processar sua mensagem. Tente novamente."
+        controller.enqueue(sse({ type: "error", error: userMsg }))
+
+        if (slashAgent && !doneSent) {
+          void admin.from("agent_executions").insert({
+            user_id: user.id, session_id: finalSid, company_id: resolvedCompany,
+            command: `/${slashAgent.command}`, slash_agent_id: slashAgent.id,
+            routing_reason: "slash_command", status: "failed",
+            error_message: raw.slice(0, 500), finished_at: new Date().toISOString(),
+          })
+        }
+
+        const displayMsg = `⚠️ ${userMsg}`
+        await saveAssistant(displayMsg, "error", raw)
+        emitDone(displayMsg, provider, provider, { input_tokens: 0, output_tokens: 0 }, userMsg)
       } finally {
         controller.close()
       }
