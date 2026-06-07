@@ -20,12 +20,14 @@ export interface RateLimitResult {
 // ─── Limites de requisições por rota ─────────────────────────────────────────
 
 export const RATE_LIMITS = {
-  chat:       { limit: 30,  windowMs: 60_000 },
-  slashAgent: { limit: 30,  windowMs: 60_000 },
-  browser:    { limit: 5,   windowMs: 60_000 },
-  finance:    { limit: 10,  windowMs: 60_000 },
-  automation: { limit: 20,  windowMs: 60_000 },
-  default:    { limit: 60,  windowMs: 60_000 },
+  chat:       { limit: 30,  windowMs: 60_000   },
+  slashAgent: { limit: 30,  windowMs: 60_000   },
+  browser:    { limit: 5,   windowMs: 60_000   },
+  finance:    { limit: 10,  windowMs: 60_000   },
+  automation: { limit: 20,  windowMs: 60_000   },
+  default:    { limit: 60,  windowMs: 60_000   },
+  authLogin:  { limit: 5,   windowMs: 900_000  }, // 5 tentativas em 15 min
+  authReset:  { limit: 3,   windowMs: 3_600_000 }, // 3 tentativas em 1 hora
 } as const
 
 // ─── Limites de tamanho de body (bytes) ──────────────────────────────────────

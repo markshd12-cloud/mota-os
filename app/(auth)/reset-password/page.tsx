@@ -15,30 +15,80 @@ export default function ResetPasswordPage() {
   const [error,        setError]        = useState<string | null>(null)
   const [success,      setSuccess]      = useState(false)
 
-  // Troca o code da URL por uma sessão de recovery
+  // Estabelece a sessão de recovery a partir da URL.
+  // Suporta dois formatos de link:
+  //   1. Hash (admin generateLink / convite): #access_token=...&refresh_token=...&type=recovery
+  //   2. PKCE (e-mail padrão Supabase):        ?code=...
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const code   = params.get("code")
-
-    if (!code) {
-      setInitError("Link inválido ou expirado. Solicite um novo e-mail de recuperação.")
-      return
-    }
-
     const supabase = createClient()
-    supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
-      if (error) {
-        setInitError(
-          error.message.includes("code verifier")
-            ? "Link já utilizado ou aberto em navegador diferente. Solicite um novo e-mail."
-            : error.message
-        )
-      } else {
+
+    // detectSessionInUrl (padrão do createBrowserClient) pode disparar este evento
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY" || (event === "SIGNED_IN" && session)) {
         setSessionReady(true)
-        // Remove o code da URL para evitar replay acidental
-        window.history.replaceState({}, "", window.location.pathname)
+        setInitError(null)
       }
     })
+
+    async function init() {
+      const hash        = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : ""
+      const hashParams  = new URLSearchParams(hash)
+      const search      = new URLSearchParams(window.location.search)
+
+      const accessToken  = hashParams.get("access_token")
+      const refreshToken = hashParams.get("refresh_token")
+      const code         = search.get("code")
+      const errorDesc    = hashParams.get("error_description") || search.get("error_description")
+
+      const invalidMsg = "Link inválido ou expirado. Solicite um novo link de acesso."
+
+      if (errorDesc) {
+        setInitError(invalidMsg)
+        return
+      }
+
+      // ── Fluxo hash (link gerado pelo admin / convite) ──────────────────────
+      if (accessToken && refreshToken) {
+        const { error } = await supabase.auth.setSession({
+          access_token:  accessToken,
+          refresh_token: refreshToken,
+        })
+        if (error) setInitError(invalidMsg)
+        else {
+          setSessionReady(true)
+          window.history.replaceState({}, "", window.location.pathname)
+        }
+        return
+      }
+
+      // ── Fluxo PKCE (?code=) ────────────────────────────────────────────────
+      if (code) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code)
+        if (error) {
+          setInitError(
+            error.message.includes("code verifier")
+              ? "Link já utilizado ou aberto em navegador diferente. Solicite um novo link."
+              : invalidMsg
+          )
+        } else {
+          setSessionReady(true)
+          window.history.replaceState({}, "", window.location.pathname)
+        }
+        return
+      }
+
+      // ── Sem token explícito: detectSessionInUrl pode já ter consumido o hash ─
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session) {
+        setSessionReady(true)
+        return
+      }
+
+      setInitError(invalidMsg)
+    }
+
+    void init()
+    return () => sub.subscription.unsubscribe()
   }, [])
 
   async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {

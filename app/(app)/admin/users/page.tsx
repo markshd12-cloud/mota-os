@@ -14,8 +14,12 @@ import {
   Trash2,
   Shield,
   Building2,
+  UserPlus,
+  Mail,
 } from "lucide-react"
 import { PageHeader } from "@/components/ui/PageHeader"
+import { EmptyState } from "@/components/ui/EmptyState"
+import { showSuccess, showError } from "@/lib/toast"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -419,6 +423,160 @@ function EditUserModal({
   )
 }
 
+// ─── Invite Modal ─────────────────────────────────────────────────────────────
+
+function InviteUserModal({
+  onClose,
+  onInvited,
+}: {
+  onClose:   () => void
+  onInvited: () => void
+}) {
+  const [name,    setName]    = useState("")
+  const [email,   setEmail]   = useState("")
+  const [company, setCompany] = useState("grupo")
+  const [sending, setSending] = useState(false)
+  const [error,   setError]   = useState<string | null>(null)
+
+  async function handleSubmit() {
+    if (!name.trim())  { setError("Informe o nome do usuário."); return }
+    if (!email.trim()) { setError("Informe o e-mail."); return }
+    setSending(true)
+    setError(null)
+    try {
+      const form = new FormData()
+      form.append("name", name.trim())
+      form.append("email", email.trim())
+      form.append("company_id", company)
+
+      const res  = await fetch("/api/users", { method: "POST", body: form })
+      const json = await res.json() as { message?: string; error?: string }
+      if (!res.ok) throw new Error(json.error ?? "Erro ao enviar convite")
+
+      showSuccess(json.message ?? `Convite enviado para ${email}`)
+      onInvited()
+      onClose()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Erro ao enviar convite"
+      setError(msg)
+      showError(msg)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 10 }}
+        transition={{ duration: 0.15 }}
+        className="relative w-full max-w-md rounded-2xl border shadow-2xl overflow-hidden"
+        style={{ background: "var(--bg-card)", borderColor: "var(--border-color)" }}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center gap-3 px-5 py-4 border-b"
+          style={{ borderColor: "var(--border-color)" }}
+        >
+          <div className="w-9 h-9 rounded-full flex items-center justify-center bg-mota-600/15 shrink-0">
+            <UserPlus size={16} className="text-mota-500" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+              Convidar usuário
+            </p>
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+              Enviaremos um e-mail para definir a senha
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors hover:bg-[var(--bg-hover)]"
+            style={{ color: "var(--text-muted)" }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-5 space-y-3">
+          <div>
+            <label className="text-[11px] font-medium mb-1 block" style={{ color: "var(--text-muted)" }}>
+              Nome
+            </label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Nome completo"
+              className="w-full text-sm px-3 py-2 rounded-lg border outline-none focus:border-mota-500 transition-colors"
+              style={{ background: "var(--bg-hover)", borderColor: "var(--border-color)", color: "var(--text-primary)" }}
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-medium mb-1 block" style={{ color: "var(--text-muted)" }}>
+              E-mail
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="usuario@email.com"
+              className="w-full text-sm px-3 py-2 rounded-lg border outline-none focus:border-mota-500 transition-colors"
+              style={{ background: "var(--bg-hover)", borderColor: "var(--border-color)", color: "var(--text-primary)" }}
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-medium mb-1 block" style={{ color: "var(--text-muted)" }}>
+              Empresa padrão
+            </label>
+            <select
+              value={company}
+              onChange={(e) => setCompany(e.target.value)}
+              className="w-full text-sm px-3 py-2 rounded-lg border outline-none focus:border-mota-500 transition-colors"
+              style={{ background: "var(--bg-hover)", borderColor: "var(--border-color)", color: "var(--text-primary)" }}
+            >
+              {COMPANY_OPTIONS.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {error && (
+            <p className="text-xs text-red-400 flex items-center gap-1.5">
+              <AlertCircle size={12} /> {error}
+            </p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div
+          className="flex items-center justify-end gap-2 px-5 py-3 border-t"
+          style={{ borderColor: "var(--border-color)" }}
+        >
+          <button
+            onClick={onClose}
+            className="text-xs px-4 py-2 rounded-xl border transition-colors hover:bg-[var(--bg-hover)]"
+            style={{ borderColor: "var(--border-color)", color: "var(--text-secondary)" }}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={() => void handleSubmit()}
+            disabled={sending}
+            className="flex items-center gap-1.5 text-xs px-4 py-2 rounded-xl font-semibold text-white bg-mota-600 hover:bg-mota-700 transition-colors disabled:opacity-50"
+          >
+            {sending ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
+            Enviar convite
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function AdminUsersPage() {
@@ -427,6 +585,7 @@ export default function AdminUsersPage() {
   const [fetchErr, setFetchErr] = useState<string | null>(null)
   const [search,   setSearch]   = useState("")
   const [editing,  setEditing]  = useState<UserProfile | null>(null)
+  const [inviting, setInviting] = useState(false)
   const [companyFilter, setCompanyFilter] = useState("")
 
   const load = useCallback(async () => {
@@ -463,6 +622,14 @@ export default function AdminUsersPage() {
       <PageHeader
         title="Gestão de Usuários"
         subtitle={loading ? "Carregando…" : `${users.length} usuário${users.length !== 1 ? "s" : ""} · ${adminCount} admin`}
+        actions={
+          <button
+            onClick={() => setInviting(true)}
+            className="flex items-center gap-2 text-xs px-3 py-2 rounded-xl bg-mota-600 hover:bg-mota-700 text-white transition-colors"
+          >
+            <UserPlus size={13} /> Convidar usuário
+          </button>
+        }
       />
 
       <div className="flex-1 overflow-y-auto p-6">
@@ -550,12 +717,24 @@ export default function AdminUsersPage() {
               style={{ background: "var(--bg-card)", borderColor: "var(--border-color)" }}
             >
               {users.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 gap-3">
-                  <Users size={28} style={{ color: "var(--text-muted)" }} />
-                  <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-                    {search || companyFilter ? "Nenhum usuário encontrado para este filtro" : "Nenhum usuário encontrado"}
-                  </p>
-                </div>
+                search || companyFilter ? (
+                  <EmptyState
+                    icon={Search}
+                    title="Nenhum usuário encontrado"
+                    description="Nenhum resultado para este filtro. Tente ajustar a busca ou a empresa."
+                  />
+                ) : (
+                  <EmptyState
+                    icon={Users}
+                    title="Nenhum usuário ainda"
+                    description="Convide os funcionários por e-mail para que definam a própria senha e comecem a usar o sistema."
+                    action={{
+                      label:   "Convidar usuário",
+                      icon:    UserPlus,
+                      onClick: () => setInviting(true),
+                    }}
+                  />
+                )
               ) : (
                 <table className="w-full">
                   <thead>
@@ -670,6 +849,16 @@ export default function AdminUsersPage() {
             user={editing}
             onClose={() => setEditing(null)}
             onSaved={handleSaved}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Invite modal */}
+      <AnimatePresence>
+        {inviting && (
+          <InviteUserModal
+            onClose={() => setInviting(false)}
+            onInvited={() => void load()}
           />
         )}
       </AnimatePresence>

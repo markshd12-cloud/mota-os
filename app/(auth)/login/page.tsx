@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase-browser"
+import { createClient } from "@/lib/supabase-browser"  // usado pelo magic link
 
 type Mode = "login" | "forgot" | "magic"
 
@@ -30,15 +30,15 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const res = await fetch("/api/auth/email-login", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ email, password }),
+    })
 
-    if (error) {
-      setError(
-        error.message === "Invalid login credentials"
-          ? "E-mail ou senha incorretos."
-          : error.message
-      )
+    if (!res.ok) {
+      const data = await res.json() as { error?: string }
+      setError(data.error ?? "Erro ao entrar. Tente novamente.")
       setLoading(false)
       return
     }
@@ -55,14 +55,19 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
-    const supabase = createClient()
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+    const res = await fetch("/api/auth/email-reset", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        email,
+        redirectTo: `${window.location.origin}/reset-password`,
+      }),
     })
 
     setLoading(false)
-    if (error) {
-      setError(error.message)
+    if (!res.ok) {
+      const data = await res.json() as { error?: string }
+      setError(data.error ?? "Erro ao enviar. Tente novamente.")
       return
     }
     setSent(true)

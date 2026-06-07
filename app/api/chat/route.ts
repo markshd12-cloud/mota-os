@@ -423,8 +423,8 @@ export async function POST(req: NextRequest) {
         errMsg?:    string,
         modelUsed?: string,
         provUsed?:  string,
-      ) {
-        if (!content) return  // nunca salva vazio
+      ): Promise<string | null> {
+        if (!content) return null  // nunca salva vazio
         const row = {
           session_id:    finalSid,
           role:          "assistant" as const,
@@ -436,26 +436,29 @@ export async function POST(req: NextRequest) {
           model_used:    modelUsed   ?? null,
           provider:      provUsed    ?? null,
         }
-        const { error: e1 } = await admin.from("messages").insert(row)
-        if (e1) {
-          // Fallback: sem colunas extras (status/error_message podem não existir)
-          await admin.from("messages").insert({
-            session_id: finalSid,
-            role:       "assistant",
-            content,
-            blocks:     msgBlocks,
-            agent_id:   body.agent_id ?? null,
-          }).then(({ error: e2 }) => {
-            if (e2) console.error("[chat] assistant save fallback failed:", e2.message)
-          })
+        const { data: inserted, error: e1 } = await admin
+          .from("messages").insert(row).select("id").single()
+        if (!e1) return (inserted?.id as string) ?? null
+        // Fallback: sem colunas extras (status/error_message podem não existir)
+        const { data: inserted2, error: e2 } = await admin.from("messages").insert({
+          session_id: finalSid,
+          role:       "assistant",
+          content,
+          blocks:     msgBlocks,
+          agent_id:   body.agent_id ?? null,
+        }).select("id").single()
+        if (e2) {
+          console.error("[chat] assistant save fallback failed:", e2.message)
+          return null
         }
+        return (inserted2?.id as string) ?? null
       }
 
       // ── Helper: emite done e fecha ─────────────────────────────────────────
-      function emitDone(content: string, model: string, provider: string, usage: object, error: string | null) {
+      function emitDone(content: string, model: string, provider: string, usage: object, error: string | null, messageId: string | null = null) {
         if (doneSent) return
         doneSent = true
-        controller.enqueue(sse({ type: "done", session_id: finalSid, content, model, provider, usage, error }))
+        controller.enqueue(sse({ type: "done", session_id: finalSid, message_id: messageId, content, model, provider, usage, error }))
       }
 
       // Sinaliza ao cliente qual agente vai responder
@@ -489,8 +492,8 @@ export async function POST(req: NextRequest) {
               })
             }
 
-            await saveAssistant(displayMsg, "error", errMsg)
-            emitDone(displayMsg, provider, provider, { input_tokens: 0, output_tokens: 0 }, errMsg)
+            const savedErrId = await saveAssistant(displayMsg, "error", errMsg)
+            emitDone(displayMsg, provider, provider, { input_tokens: 0, output_tokens: 0 }, errMsg, savedErrId)
 
           } else {
             // Fim com sucesso
@@ -508,7 +511,7 @@ export async function POST(req: NextRequest) {
               controller.enqueue(sse({ type: "delta", text: fallback }))
             }
 
-            await saveAssistant(accumulated, "done", undefined, usedModel, usedProvider)
+            const savedId = await saveAssistant(accumulated, "done", undefined, usedModel, usedProvider)
 
             void logActivity({
               userId:    user.id,
@@ -541,7 +544,7 @@ export async function POST(req: NextRequest) {
               })
             }
 
-            emitDone(accumulated, usedModel, usedProvider, usage, null)
+            emitDone(accumulated, usedModel, usedProvider, usage, null, savedId)
           }
         }
       } catch (err: unknown) {
@@ -562,8 +565,8 @@ export async function POST(req: NextRequest) {
         }
 
         const displayMsg = `⚠️ ${userMsg}`
-        await saveAssistant(displayMsg, "error", raw)
-        emitDone(displayMsg, provider, provider, { input_tokens: 0, output_tokens: 0 }, userMsg)
+        const savedCatchId = await saveAssistant(displayMsg, "error", raw)
+        emitDone(displayMsg, provider, provider, { input_tokens: 0, output_tokens: 0 }, userMsg, savedCatchId)
       } finally {
         controller.close()
       }

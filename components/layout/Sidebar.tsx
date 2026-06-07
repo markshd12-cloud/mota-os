@@ -87,6 +87,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userInitial, setUserInitial] = useState("U");
   const [unreadNews, setUnreadNews] = useState(0);
+  const [counts, setCounts] = useState<{ projects: number; agents: number }>({ projects: 0, agents: 0 });
 
   const isCollapsed = collapsed && !isHovered;
 
@@ -138,6 +139,20 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     return () => window.removeEventListener("announcements-read", fetchUnread);
   }, []);
 
+  useEffect(() => {
+    fetch("/api/sidebar/counts")
+      .then(r => (r.ok ? r.json() : null))
+      .then((data: { projects?: number; agents?: number } | null) => {
+        if (data) {
+          setCounts({
+            projects: typeof data.projects === "number" ? data.projects : 0,
+            agents:   typeof data.agents   === "number" ? data.agents   : 0,
+          });
+        }
+      })
+      .catch(() => {});
+  }, [pathname]);
+
   async function handleLogout() {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -160,9 +175,16 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     return pathname === base || (base !== "/" && pathname.startsWith(base));
   }
 
-  const navItems = companyLoading
+  const navItems = (companyLoading
     ? ALL_NAV_ITEMS.filter(i => !i.adminOnly)
-    : ALL_NAV_ITEMS.filter(i => !i.adminOnly || isAdmin);
+    : ALL_NAV_ITEMS.filter(i => !i.adminOnly || isAdmin)
+  ).map(item => {
+    if (item.label === "Projetos" && counts.projects > 0)
+      return { ...item, badge: counts.projects };
+    if (item.label === "Agentes" && counts.agents > 0)
+      return { ...item, badge: counts.agents };
+    return item;
+  });
 
   return (
     <motion.aside

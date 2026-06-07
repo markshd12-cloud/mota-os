@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { MessageSquare, Sparkles, PanelRightOpen, PanelRightClose, Share2, LogIn, Copy, LogOut } from "lucide-react"
+import { MessageSquare, Sparkles, PanelRightOpen, PanelRightClose, Share2, LogIn, Copy, LogOut, PanelLeftOpen } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
@@ -37,6 +37,7 @@ interface ChatWindowProps {
   onRegenerate?:    (messageId: string) => void
   onToggleRightPanel: () => void
   onSourcesChanged?: () => void
+  onToggleSessions?: () => void   // mobile: abre o drawer de sessões
   agents?:          Agent[]
 }
 
@@ -73,6 +74,7 @@ export function ChatWindow({
   onRegenerate,
   onToggleRightPanel,
   onSourcesChanged,
+  onToggleSessions,
   agents,
 }: ChatWindowProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -279,6 +281,18 @@ export function ChatWindow({
         className="flex items-center gap-3 px-5 h-14 border-b shrink-0"
         style={{ borderColor: "var(--border-color)", background: "var(--bg-sidebar)" }}
       >
+        {onToggleSessions && (
+          <button
+            onClick={onToggleSessions}
+            className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors hover:bg-[var(--bg-hover)] shrink-0"
+            style={{ color: "var(--text-muted)" }}
+            title="Ver sessões"
+            aria-label="Ver sessões"
+          >
+            <PanelLeftOpen size={16} />
+          </button>
+        )}
+
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate" style={{ color: "var(--text-primary)" }}>
             {sessionTitle ?? "Nova sessão"}

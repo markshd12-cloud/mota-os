@@ -8,6 +8,7 @@ import {
   X, Upload, Edit2, Archive, Eye, Loader2, Zap,
 } from "lucide-react"
 import { PageHeader } from "@/components/ui/PageHeader"
+import { EmptyState } from "@/components/ui/EmptyState"
 import { useCompany } from "@/components/providers/CompanyProvider"
 import { cn } from "@/lib/utils"
 
@@ -744,20 +745,24 @@ export default function SourcesPage() {
               </p>
             </div>
           ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 gap-3">
-              <Database size={32} style={{ color: "var(--text-muted)" }} />
-              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-                {sources.length === 0 ? "Nenhuma fonte cadastrada" : "Nenhuma fonte encontrada"}
-              </p>
-              {sources.length === 0 && (
-                <button
-                  onClick={() => setEditSource("new")}
-                  className="flex items-center gap-2 text-xs px-4 py-2 rounded-xl bg-mota-600 hover:bg-mota-700 text-white transition-colors mt-1"
-                >
-                  <Plus size={13} /> Criar primeira fonte
-                </button>
-              )}
-            </div>
+            sources.length === 0 ? (
+              <EmptyState
+                icon={Database}
+                title="Nenhuma fonte cadastrada"
+                description="Adicione documentos, APIs e bases de conhecimento para enriquecer as respostas dos agentes."
+                action={{
+                  label:   "Criar primeira fonte",
+                  icon:    Plus,
+                  onClick: () => setEditSource("new"),
+                }}
+              />
+            ) : (
+              <EmptyState
+                icon={Search}
+                title="Nenhuma fonte encontrada"
+                description="Tente outro termo de busca ou ajuste os filtros."
+              />
+            )
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {filtered.map((s, i) => (

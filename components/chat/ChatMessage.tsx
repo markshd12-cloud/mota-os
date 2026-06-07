@@ -2,10 +2,14 @@
 
 import { useState, useCallback } from "react"
 import { motion } from "framer-motion"
-import { Check, Copy, CheckSquare, Square, Zap, Rocket, RefreshCw } from "lucide-react"
+import { Check, Copy, CheckSquare, Square, Zap, Rocket, RefreshCw, ThumbsUp, ThumbsDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Message, MessageBlock, ChecklistBlock } from "@/lib/mocks/messages"
 import { modelLabel } from "@/lib/ai/model-registry"
+import { showError } from "@/lib/toast"
+
+// UUID v4 — distingue mensagens persistidas das otimistas (ex.: "ai-123")
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function extractMessageText(content: MessageBlock[]): string {
   return content
@@ -33,6 +37,9 @@ export function ChatMessage({ message, index, onSendToRocket, onRegenerate }: Ch
   const isUser = message.role === "user"
   const [hovered, setHovered] = useState(false)
   const [copied,  setCopied]  = useState(false)
+  const [feedback, setFeedback] = useState<number | null>(message.feedback ?? null)
+
+  const canFeedback = !isUser && UUID_RE.test(message.id)
 
   const handleCopy = useCallback(() => {
     const text = extractMessageText(message.content)
@@ -41,6 +48,23 @@ export function ChatMessage({ message, index, onSendToRocket, onRegenerate }: Ch
       setTimeout(() => setCopied(false), 2000)
     }).catch(() => {})
   }, [message.content])
+
+  const handleFeedback = useCallback(async (value: 1 | -1) => {
+    const next = feedback === value ? null : value   // clicar de novo remove
+    const prev = feedback
+    setFeedback(next)                                 // otimista
+    try {
+      const res = await fetch(`/api/messages/${message.id}/feedback`, {
+        method:  "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ feedback: next }),
+      })
+      if (!res.ok) throw new Error()
+    } catch {
+      setFeedback(prev)                               // reverte
+      showError("Não foi possível registrar o feedback.")
+    }
+  }, [feedback, message.id])
 
   return (
     <motion.div
@@ -132,9 +156,55 @@ export function ChatMessage({ message, index, onSendToRocket, onRegenerate }: Ch
               style={{ color: copied ? "#16a34a" : "var(--text-muted)", borderColor: "var(--border-color)" }}
               title="Copiar resposta"
             >
-              {copied ? <Check size={11} /> : <Copy size={11} />}
+              <motion.span
+                key={copied ? "check" : "copy"}
+                initial={{ scale: 0.6, opacity: 0 }}
+                animate={{ scale: copied ? [0.6, 1.3, 1] : 1, opacity: 1 }}
+                transition={{ duration: 0.3 }}
+                className="inline-flex"
+              >
+                {copied ? <Check size={11} /> : <Copy size={11} />}
+              </motion.span>
               {copied ? "Copiado!" : "Copiar"}
             </button>
+
+            {/* Feedback 👍 / 👎 */}
+            {canFeedback && (
+              <div
+                className="flex items-center rounded-lg border overflow-hidden"
+                style={{ borderColor: "var(--border-color)" }}
+              >
+                <button
+                  onClick={() => void handleFeedback(1)}
+                  className="flex items-center justify-center px-2 py-1 transition-colors hover:bg-[var(--bg-hover)]"
+                  style={{ color: feedback === 1 ? "#16a34a" : "var(--text-muted)" }}
+                  title="Resposta útil"
+                >
+                  <motion.span
+                    animate={feedback === 1 ? { scale: [1, 1.3, 1] } : { scale: 1 }}
+                    transition={{ duration: 0.3 }}
+                    className="inline-flex"
+                  >
+                    <ThumbsUp size={11} fill={feedback === 1 ? "#16a34a" : "none"} />
+                  </motion.span>
+                </button>
+                <div className="w-px self-stretch" style={{ background: "var(--border-color)" }} />
+                <button
+                  onClick={() => void handleFeedback(-1)}
+                  className="flex items-center justify-center px-2 py-1 transition-colors hover:bg-[var(--bg-hover)]"
+                  style={{ color: feedback === -1 ? "#ef4444" : "var(--text-muted)" }}
+                  title="Resposta não útil"
+                >
+                  <motion.span
+                    animate={feedback === -1 ? { scale: [1, 1.3, 1] } : { scale: 1 }}
+                    transition={{ duration: 0.3 }}
+                    className="inline-flex"
+                  >
+                    <ThumbsDown size={11} fill={feedback === -1 ? "#ef4444" : "none"} />
+                  </motion.span>
+                </button>
+              </div>
+            )}
 
             {/* Gerar novamente */}
             {onRegenerate && (
