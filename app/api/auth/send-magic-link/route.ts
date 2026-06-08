@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse }   from "next/server"
-import { createClient as createBaseClient } from "@supabase/supabase-js"
+import { NextRequest, NextResponse } from "next/server"
+import { createServerClient }        from "@supabase/ssr"
 import {
   rateLimit,
   rateLimitResponse,
@@ -9,21 +9,6 @@ import {
 } from "@/lib/rate-limit"
 
 export const dynamic = "force-dynamic"
-
-// Cliente com anon key — sem sessão/cookies.
-// signInWithOtp neste cliente faz POST /auth/v1/otp com a anon key,
-// que é o mesmo endpoint que o browser SDK usa e que DEFINITIVAMENTE envia o email.
-// (admin.generateLink é para gerar o link para você enviar manualmente — não envia email)
-function getAnonClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  if (!url || !anon) {
-    throw new Error("NEXT_PUBLIC_SUPABASE_URL ou NEXT_PUBLIC_SUPABASE_ANON_KEY não configurado")
-  }
-  return createBaseClient(url, anon, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  })
-}
 
 // Deriva o origin da URL da própria request — sempre correto em qualquer ambiente.
 function getOrigin(req: NextRequest): string {
@@ -59,13 +44,39 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "E-mail inválido." }, { status: 400 })
   }
 
-  const origin = getOrigin(req)
+  const url  = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !anon) {
+    console.error("[send-magic-link] Supabase env vars missing")
+    return NextResponse.json({ error: "Erro de configuração do servidor." }, { status: 500 })
+  }
+
+  const origin     = getOrigin(req)
+  // PKCE: o email sempre aponta para /auth/callback que faz o exchangeCodeForSession server-side.
   const redirectTo = `${origin}/auth/callback`
   console.log(`[send-magic-link] email=${email} origin=${origin} redirectTo=${redirectTo}`)
 
-  try {
-    const supabase = getAnonClient()
+  // O response é criado antes do signInWithOtp para que os cookies do code_verifier
+  // sejam escritos neste mesmo objeto e devolvidos ao browser.
+  // O browser armazena o cookie e o envia de volta no GET de /auth/callback,
+  // onde exchangeCodeForSession o usa para completar o PKCE.
+  const response = NextResponse.json({ ok: true })
 
+  const supabase = createServerClient(url, anon, {
+    cookies: {
+      getAll() {
+        return req.cookies.getAll()
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value, options }) => {
+          console.log(`[send-magic-link] set cookie: ${name}`)
+          response.cookies.set(name, value, options)
+        })
+      },
+    },
+  })
+
+  try {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: redirectTo },
@@ -80,7 +91,7 @@ export async function POST(req: NextRequest) {
     }
 
     console.log(`[send-magic-link] OK email=${email}`)
-    return NextResponse.json({ ok: true })
+    return response  // inclui o cookie com o code_verifier PKCE
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`[send-magic-link] unexpected error: ${msg}`)

@@ -15,28 +15,18 @@ export default function ResetPasswordPage() {
   const [error,        setError]        = useState<string | null>(null)
   const [success,      setSuccess]      = useState(false)
 
-  // Troca o code da URL por uma sessão de recovery
+  // O /auth/callback já trocou o code por uma sessão (server-side, PKCE).
+  // Aqui apenas verificamos se a sessão de recovery está ativa.
+  // Não chamamos exchangeCodeForSession no browser — o code_verifier está em cookie
+  // (server-side) e não em localStorage (browser), portanto a troca client-side
+  // sempre falharia com "code verifier not found".
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const code   = params.get("code")
-
-    if (!code) {
-      setInitError("Link inválido ou expirado. Solicite um novo e-mail de recuperação.")
-      return
-    }
-
     const supabase = createClient()
-    supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
-      if (error) {
-        setInitError(
-          error.message.includes("code verifier")
-            ? "Link já utilizado ou aberto em navegador diferente. Solicite um novo e-mail."
-            : error.message
-        )
-      } else {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
         setSessionReady(true)
-        // Remove o code da URL para evitar replay acidental
-        window.history.replaceState({}, "", window.location.pathname)
+      } else {
+        setInitError("Link inválido ou expirado. Solicite um novo e-mail de recuperação.")
       }
     })
   }, [])
@@ -57,29 +47,33 @@ export default function ResetPasswordPage() {
     }
 
     setLoading(true)
-    const supabase = createClient()
-    const { data: { user: currentUser } } = await supabase.auth.getUser()
-    const { error } = await supabase.auth.updateUser({ password })
+    try {
+      const supabase = createClient()
+      const { data: { user: currentUser } } = await supabase.auth.getUser()
+      const { error: updateError } = await supabase.auth.updateUser({ password })
 
-    if (error) {
-      setError(error.message)
+      if (updateError) {
+        setError(updateError.message)
+        return
+      }
+
+      // Registra primeiro acesso se for convite (app_metadata.must_change_password=true).
+      const isInvite = currentUser?.app_metadata?.must_change_password === true
+      if (isInvite) {
+        await fetch("/api/auth/first-access", {
+          method: "POST",
+          credentials: "same-origin",
+        }).catch(() => {/* não bloqueia o fluxo */})
+      }
+
+      setSuccess(true)
+      await supabase.auth.signOut()
+      setTimeout(() => router.push("/login"), 1800)
+    } catch {
+      setError("Erro de conexão. Verifique sua internet e tente novamente.")
+    } finally {
       setLoading(false)
-      return
     }
-
-    // Registra primeiro acesso se for convite (apenas quando app_metadata tiver must_change_password=true).
-    // first_access_at fica em profiles (não em user_metadata), por isso usamos só app_metadata.
-    const isInvite = currentUser?.app_metadata?.must_change_password === true
-    if (isInvite) {
-      await fetch("/api/auth/first-access", {
-        method: "POST",
-        credentials: "same-origin",
-      }).catch(() => {/* não bloqueia */})
-    }
-
-    setSuccess(true)
-    await supabase.auth.signOut()
-    setTimeout(() => router.push("/login"), 1800)
   }
 
   const inputCls   = "w-full rounded-lg px-3 py-2 text-sm outline-none transition-colors"
@@ -129,10 +123,10 @@ export default function ResetPasswordPage() {
         </div>
       )}
 
-      {/* Aguardando troca do code */}
+      {/* Aguardando verificação de sessão */}
       {!initError && !sessionReady && (
         <p className="text-sm text-center" style={{ color: "var(--text-secondary)" }}>
-          Verificando link…
+          Verificando sessão…
         </p>
       )}
 
