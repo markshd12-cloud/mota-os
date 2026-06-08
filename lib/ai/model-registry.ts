@@ -29,10 +29,15 @@ const MODE_TO_PROVIDER: Record<Exclude<AIMode, "jarvis">, { provider: string; mo
   deepseek: { provider: "deepseek",  model: "deepseek-chat" },
 }
 
-/** Verifica se o provider do modo está configurado (tem API key). */
+/** Verifica se o provider do modo está configurado. */
 function isProviderConfigured(provider: string): boolean {
   switch (provider) {
-    case "anthropic": return !!process.env.ANTHROPIC_API_KEY
+    case "anthropic":
+      // API key estática OU Auth0 WIF (sem arquivo — token buscado dinamicamente)
+      return !!(
+        process.env.ANTHROPIC_API_KEY ||
+        (process.env.AUTH0_DOMAIN && process.env.AUTH0_CLIENT_ID && process.env.AUTH0_CLIENT_SECRET)
+      )
     case "openai":    return !!process.env.OPENAI_API_KEY
     case "gemini":    return !!(process.env.GOOGLE_AI_API_KEY || process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
     case "deepseek":  return !!process.env.DEEPSEEK_API_KEY

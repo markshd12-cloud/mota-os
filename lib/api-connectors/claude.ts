@@ -1,6 +1,5 @@
-// claude.ts — sem imports problemáticos, SDK resolve WIF automaticamente
-
 import Anthropic from "@anthropic-ai/sdk"
+import { getAnthropicAuthOptions } from "@/lib/anthropic-auth"
 
 export type ClaudeModel =
   | "claude-opus-4-6"
@@ -35,26 +34,24 @@ const PRICING: Record<ClaudeModel, { in: number; out: number }> = {
 }
 
 export class ClaudeClient {
-  private sdk: Anthropic
   private defaultModel: ClaudeModel = "claude-sonnet-4-6"
 
-  constructor() {
-    // WIF (Workload Identity Federation) — sem API key estática.
-    // O SDK lê automaticamente as variáveis de ambiente:
-    //   ANTHROPIC_FEDERATION_RULE_ID   → ID da regra (fdrl_...)
-    //   ANTHROPIC_ORGANIZATION_ID      → UUID da organização
-    //   ANTHROPIC_SERVICE_ACCOUNT_ID   → ID da service account (svac_...)
-    //   ANTHROPIC_IDENTITY_TOKEN_FILE  → caminho do JWT emitido pelo GitHub Actions
-    //   ANTHROPIC_WORKSPACE_ID         → opcional; omitir quando a regra usa "todos os workspaces"
-    // Se ANTHROPIC_API_KEY estiver definida, ela tem precedência e silencia o WIF.
-    this.sdk = new Anthropic({
+  // Cria o SDK com credenciais frescas a cada chamada.
+  // getAnthropicAuthOptions() retorna do cache em memória no hot path —
+  // chamada ao Auth0 só ocorre em cold start ou quando o token expira.
+  private async getSDK(): Promise<Anthropic> {
+    const authOptions = await getAnthropicAuthOptions()
+    return new Anthropic({
+      ...authOptions,
       baseURL:    process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com",
       maxRetries: 2,
     })
   }
 
   async chat(request: ClaudeChatRequest): Promise<ClaudeChatResponse> {
-    const response = await this.sdk.messages.create({
+    const sdk = await this.getSDK()
+
+    const response = await sdk.messages.create({
       model:      request.model      ?? this.defaultModel,
       max_tokens: request.max_tokens ?? 4096,
       system:     request.system,
@@ -78,7 +75,9 @@ export class ClaudeClient {
   }
 
   async *stream(request: ClaudeChatRequest): AsyncGenerator<string> {
-    const stream = this.sdk.messages.stream({
+    const sdk = await this.getSDK()
+
+    const stream = sdk.messages.stream({
       model:      request.model      ?? this.defaultModel,
       max_tokens: request.max_tokens ?? 4096,
       system:     request.system,

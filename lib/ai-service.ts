@@ -6,10 +6,11 @@
 
 import Anthropic from "@anthropic-ai/sdk"
 import OpenAI    from "openai"
-import { requestCodexResponse } from "@/lib/codex-client"
-import { getValidGeminiToken }        from "@/lib/gemini-auth"
-import { getServiceAccountToken }     from "@/lib/gemini-service-account"
+import { requestCodexResponse }   from "@/lib/codex-client"
+import { getValidGeminiToken }    from "@/lib/gemini-auth"
+import { getServiceAccountToken } from "@/lib/gemini-service-account"
 import { createGeminiClient, type GeminiContent, type GeminiModel } from "@/lib/api-connectors/gemini"
+import { getAnthropicAuthOptions } from "@/lib/anthropic-auth"
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -53,10 +54,12 @@ export type AIChunk = AIChunkDelta | AIChunkDone | AIChunkError
 
 // ─── Clientes (instanciados uma vez, reutilizados) ────────────────────────────
 
-function getAnthropicClient() {
-  // Sem API key estática — o SDK resolve credenciais via WIF (variáveis ANTHROPIC_FEDERATION_*)
-  // ou via ANTHROPIC_API_KEY se estiver definida. Não forçar a key aqui.
+// Cria um cliente Anthropic com credenciais dinâmicas (API key OU token Auth0 WIF).
+// Chamado a cada request — barato (sem HTTP no hot path graças ao cache em anthropic-auth.ts).
+async function getAnthropicClient() {
+  const authOptions = await getAnthropicAuthOptions()
   return new Anthropic({
+    ...authOptions,
     baseURL:    process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com",
     maxRetries: 2,
   })
@@ -86,7 +89,7 @@ export async function* streamChat(params: AIStreamParams): AsyncGenerator<AIChun
 // ─── Anthropic ────────────────────────────────────────────────────────────────
 
 async function* streamAnthropic(params: AIStreamParams): AsyncGenerator<AIChunk> {
-  const client = getAnthropicClient()
+  const client = await getAnthropicClient()
   const model  = params.model ?? "claude-sonnet-4-6"
 
   let inputTokens  = 0
