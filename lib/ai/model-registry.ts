@@ -4,30 +4,48 @@
  * SERVER-SIDE ONLY para verificações que usam env vars.
  */
 
-export type AIMode = "jarvis" | "claude" | "gemini" | "chatgpt" | "deepseek"
+export type AIMode = "jarvis" | "claude" | "gemini" | "chatgpt" | "deepseek";
 
 export interface AIModeConfig {
-  id:          AIMode
-  label:       string
-  icon:        string
-  description: string
+  id: AIMode;
+  label: string;
+  icon: string;
+  description: string;
 }
 
 export const AI_MODE_LIST: AIModeConfig[] = [
-  { id: "jarvis",   label: "Jarvis",   icon: "⚡", description: "Jarvis escolhe automaticamente" },
-  { id: "claude",   label: "Claude",   icon: "🟠", description: "Anthropic Claude Sonnet" },
-  { id: "gemini",   label: "Gemini",   icon: "🔵", description: "Google Gemini" },
-  { id: "chatgpt",  label: "ChatGPT",  icon: "🟢", description: "OpenAI GPT-4o" },
-  { id: "deepseek", label: "Deepseek", icon: "🔷", description: "Deepseek Chat" },
-]
+  {
+    id: "jarvis",
+    label: "Jarvis",
+    icon: "⚡",
+    description: "Jarvis escolhe automaticamente",
+  },
+  {
+    id: "claude",
+    label: "Claude",
+    icon: "🟠",
+    description: "Anthropic Claude Sonnet",
+  },
+  { id: "gemini", label: "Gemini", icon: "🔵", description: "Google Gemini" },
+  { id: "chatgpt", label: "ChatGPT", icon: "🟢", description: "OpenAI GPT-4o" },
+  {
+    id: "deepseek",
+    label: "Deepseek",
+    icon: "🔷",
+    description: "Deepseek Chat",
+  },
+];
 
 /** Mapeamento de modo → provider + modelo padrão (server-side) */
-const MODE_TO_PROVIDER: Record<Exclude<AIMode, "jarvis">, { provider: string; model: string }> = {
-  claude:   { provider: "anthropic", model: "claude-sonnet-4-6" },
-  gemini:   { provider: "gemini",    model: "gemini-2.5-flash-preview-05-20" },
-  chatgpt:  { provider: "openai",    model: "gpt-4o" },
-  deepseek: { provider: "deepseek",  model: "deepseek-chat" },
-}
+const MODE_TO_PROVIDER: Record<
+  Exclude<AIMode, "jarvis">,
+  { provider: string; model: string }
+> = {
+  claude: { provider: "anthropic", model: "claude-sonnet-4-6" },
+  gemini: { provider: "gemini", model: "gemini-2.5-flash" },
+  chatgpt: { provider: "openai", model: "gpt-4o" },
+  deepseek: { provider: "deepseek", model: "deepseek-chat" },
+};
 
 /** Verifica se o provider do modo está configurado. */
 function isProviderConfigured(provider: string): boolean {
@@ -36,11 +54,15 @@ function isProviderConfigured(provider: string): boolean {
       // API key estática OU Auth0 WIF (sem arquivo — token buscado dinamicamente)
       return !!(
         process.env.ANTHROPIC_API_KEY ||
-        (process.env.AUTH0_DOMAIN && process.env.AUTH0_CLIENT_ID && process.env.AUTH0_CLIENT_SECRET)
-      )
+        (process.env.AUTH0_DOMAIN &&
+          process.env.AUTH0_CLIENT_ID &&
+          process.env.AUTH0_CLIENT_SECRET)
+      );
     case "openai":
       // API key estática OU OAuth/Codex (client OAuth configurado)
-      return !!(process.env.OPENAI_API_KEY || process.env.OPENAI_OAUTH_CLIENT_ID)
+      return !!(
+        process.env.OPENAI_API_KEY || process.env.OPENAI_OAUTH_CLIENT_ID
+      );
     case "gemini":
       // Nomes reais usados no projeto: GEMINI_API_KEY (gemini.ts) e
       // GOOGLE_SERVICE_ACCOUNT_KEY (gemini-service-account.ts).
@@ -49,9 +71,11 @@ function isProviderConfigured(provider: string): boolean {
         process.env.GEMINI_API_KEY ||
         process.env.GOOGLE_SERVICE_ACCOUNT_KEY ||
         process.env.GOOGLE_CLIENT_ID
-      )
-    case "deepseek":  return !!process.env.DEEPSEEK_API_KEY
-    default:          return false
+      );
+    case "deepseek":
+      return !!process.env.DEEPSEEK_API_KEY;
+    default:
+      return false;
   }
 }
 
@@ -61,50 +85,56 @@ function isProviderConfigured(provider: string): boolean {
  */
 export function resolveAIMode(
   mode: AIMode,
-): { provider: string; model: string; routedByJarvis: boolean } | { error: string } {
+):
+  | { provider: string; model: string; routedByJarvis: boolean }
+  | { error: string } {
   if (mode === "jarvis") {
     // Modo automático — roteamento padrão do sistema
-    return { provider: "anthropic", model: "claude-sonnet-4-6", routedByJarvis: true }
+    return {
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      routedByJarvis: true,
+    };
   }
 
-  const cfg = MODE_TO_PROVIDER[mode]
+  const cfg = MODE_TO_PROVIDER[mode];
   if (!isProviderConfigured(cfg.provider)) {
     const labels: Record<string, string> = {
       anthropic: "Anthropic",
-      openai:    "OpenAI",
-      gemini:    "Google Gemini",
-      deepseek:  "Deepseek",
-    }
+      openai: "OpenAI",
+      gemini: "Google Gemini",
+      deepseek: "Deepseek",
+    };
     return {
       error: `${labels[cfg.provider] ?? cfg.provider} não está configurado. Acesse Configurações → APIs para adicionar a chave.`,
-    }
+    };
   }
 
-  return { provider: cfg.provider, model: cfg.model, routedByJarvis: false }
+  return { provider: cfg.provider, model: cfg.model, routedByJarvis: false };
 }
 
 export function isAIMode(v: string): v is AIMode {
-  return ["jarvis", "claude", "gemini", "chatgpt", "deepseek"].includes(v)
+  return ["jarvis", "claude", "gemini", "chatgpt", "deepseek"].includes(v);
 }
 
 /** Label legível para exibir na UI ("Claude Sonnet 4.6", "GPT-4o", etc.) */
 export function modelLabel(provider: string, model: string): string {
   if (provider === "anthropic") {
-    if (model.includes("sonnet")) return "Claude Sonnet"
-    if (model.includes("haiku"))  return "Claude Haiku"
-    if (model.includes("opus"))   return "Claude Opus"
-    return `Claude (${model})`
+    if (model.includes("sonnet")) return "Claude Sonnet";
+    if (model.includes("haiku")) return "Claude Haiku";
+    if (model.includes("opus")) return "Claude Opus";
+    return `Claude (${model})`;
   }
   if (provider === "openai") {
-    if (model === "gpt-4o")       return "GPT-4o"
-    if (model.includes("mini"))   return "GPT-4o Mini"
-    return `OpenAI (${model})`
+    if (model === "gpt-4o") return "GPT-4o";
+    if (model.includes("mini")) return "GPT-4o Mini";
+    return `OpenAI (${model})`;
   }
   if (provider === "gemini") {
-    if (model.includes("flash"))  return "Gemini Flash"
-    if (model.includes("pro"))    return "Gemini Pro"
-    return `Gemini (${model})`
+    if (model.includes("flash")) return "Gemini Flash";
+    if (model.includes("pro")) return "Gemini Pro";
+    return `Gemini (${model})`;
   }
-  if (provider === "deepseek")    return "Deepseek Chat"
-  return model
+  if (provider === "deepseek") return "Deepseek Chat";
+  return model;
 }
