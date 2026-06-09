@@ -10,6 +10,8 @@ import {
   KeyRound,
   Database,
   Palette,
+  Shield,
+  ShieldOff,
   ShieldCheck,
   ScrollText,
   Check,
@@ -1221,6 +1223,8 @@ interface AuthUser {
   name: string;
   created_at: string;
   last_sign_in_at: string | null;
+  role?: string;
+  companies?: string[];
 }
 
 interface CompanyOption {
@@ -1256,8 +1260,18 @@ function UsersTab() {
   const [success, setSuccess] = useState("");
   const [resetingUserId, setResetingUserId] = useState<string | null>(null);
   const [resetMsg, setResetMsg] = useState<{ id: string; text: string; ok: boolean } | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [linkingId, setLinkingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<{ id: string; text: string; ok: boolean } | null>(null);
 
   useEffect(() => {
+    createBrowserClient().auth.getUser()
+      .then(({ data }) => setCurrentUserId(data.user?.id ?? null))
+      .catch(() => {});
+
     Promise.all([
       fetch("/api/users").then(r => r.json()),
       fetch("/api/companies").then(r => r.json()),
@@ -1399,6 +1413,71 @@ function UsersTab() {
     }
   }
 
+  // Promove/rebaixa admin global imediatamente
+  async function handleToggleAdmin(u: AuthUser) {
+    const next = u.role === "admin" ? "member" : "admin";
+    setTogglingId(u.id);
+    setActionMsg(null);
+    try {
+      const res = await fetch(`/api/users/${u.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: next }),
+      });
+      const json = (await res.json()) as { user?: { role?: string }; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Erro ao alterar papel");
+      setUsers(prev => prev.map(x => (x.id === u.id ? { ...x, role: next } : x)));
+      setActionMsg({ id: u.id, text: next === "admin" ? "Agora é admin" : "Admin removido", ok: true });
+    } catch (e: unknown) {
+      setActionMsg({ id: u.id, text: e instanceof Error ? e.message : "Erro", ok: false });
+    } finally {
+      setTogglingId(null);
+      setTimeout(() => setActionMsg(null), 5000);
+    }
+  }
+
+  // Vincula o usuário a todas as empresas de uma vez
+  async function handleLinkAll(u: AuthUser) {
+    setLinkingId(u.id);
+    setActionMsg(null);
+    try {
+      const res = await fetch(`/api/users/${u.id}/companies`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ all: true, role: "member" }),
+      });
+      const json = (await res.json()) as { members?: { company_id: string }[]; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Erro ao vincular empresas");
+      const companies = (json.members ?? []).map(m => m.company_id);
+      setUsers(prev => prev.map(x => (x.id === u.id ? { ...x, companies } : x)));
+      setActionMsg({ id: u.id, text: "Vinculado a todas as empresas", ok: true });
+    } catch (e: unknown) {
+      setActionMsg({ id: u.id, text: e instanceof Error ? e.message : "Erro", ok: false });
+    } finally {
+      setLinkingId(null);
+      setTimeout(() => setActionMsg(null), 5000);
+    }
+  }
+
+  // Exclui o usuário definitivamente
+  async function handleDeleteUser(u: AuthUser) {
+    setDeletingId(u.id);
+    setActionMsg(null);
+    try {
+      const res = await fetch(`/api/users/${u.id}`, { method: "DELETE" });
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Erro ao excluir usuário");
+      setUsers(prev => prev.filter(x => x.id !== u.id));
+      setConfirmDeleteId(null);
+    } catch (e: unknown) {
+      setActionMsg({ id: u.id, text: e instanceof Error ? e.message : "Erro", ok: false });
+      setConfirmDeleteId(null);
+      setTimeout(() => setActionMsg(null), 5000);
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   function resetForm() {
     setFormData({ name: "", email: "", company_id: "" });
     setAvatarFile(null);
@@ -1469,6 +1548,13 @@ function UsersTab() {
               : "Nunca";
             const isReseting = resetingUserId === u.id;
             const thisMsg = resetMsg?.id === u.id ? resetMsg : null;
+            const thisActionMsg = actionMsg?.id === u.id ? actionMsg : null;
+            const isAdminRole = u.role === "admin";
+            const isToggling = togglingId === u.id;
+            const isLinking = linkingId === u.id;
+            const isDeleting = deletingId === u.id;
+            const isConfirming = confirmDeleteId === u.id;
+            const isSelf = currentUserId === u.id;
             return (
               <div
                 key={u.id}
@@ -1487,10 +1573,15 @@ function UsersTab() {
                   </div>
                   <div className="min-w-0">
                     <p
-                      className="text-xs font-medium truncate"
+                      className="text-xs font-medium truncate flex items-center gap-1.5"
                       style={{ color: "var(--text-primary)" }}
                     >
                       {u.name || u.email}
+                      {isAdminRole && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-400 font-semibold shrink-0">
+                          <Shield size={9} /> Admin
+                        </span>
+                      )}
                     </p>
                     <p
                       className="text-[10px] truncate"
@@ -1507,6 +1598,14 @@ function UsersTab() {
                         {thisMsg.text}
                       </p>
                     )}
+                    {thisActionMsg && (
+                      <p
+                        className="text-[10px] mt-0.5"
+                        style={{ color: thisActionMsg.ok ? "#4ade80" : "#f87171" }}
+                      >
+                        {thisActionMsg.text}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <span
@@ -1515,18 +1614,84 @@ function UsersTab() {
                 >
                   {lastSeen}
                 </span>
-                <button
-                  onClick={() => void handleResetPassword(u.id)}
-                  disabled={isReseting}
-                  title="Enviar e-mail de reset de senha"
-                  className="p-1.5 rounded-lg transition-colors disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800"
-                >
-                  {isReseting ? (
-                    <Loader2 size={13} className="animate-spin" style={{ color: "var(--text-muted)" }} />
-                  ) : (
-                    <KeyRound size={13} style={{ color: "var(--text-muted)" }} />
-                  )}
-                </button>
+
+                {isConfirming ? (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[10px] text-red-400 mr-1 hidden sm:inline">Excluir?</span>
+                    <button
+                      onClick={() => setConfirmDeleteId(null)}
+                      disabled={isDeleting}
+                      className="text-[10px] px-2 py-1 rounded-lg border transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                      style={{ borderColor: "var(--border-color)", color: "var(--text-secondary)" }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={() => void handleDeleteUser(u)}
+                      disabled={isDeleting}
+                      className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-50"
+                    >
+                      {isDeleting ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                      Confirmar
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    {/* Tornar / remover admin */}
+                    <button
+                      onClick={() => void handleToggleAdmin(u)}
+                      disabled={isToggling}
+                      title={isAdminRole ? "Remover admin global" : "Tornar admin global"}
+                      className="p-1.5 rounded-lg transition-colors disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                      {isToggling ? (
+                        <Loader2 size={13} className="animate-spin" style={{ color: "var(--text-muted)" }} />
+                      ) : isAdminRole ? (
+                        <ShieldOff size={13} className="text-amber-400" />
+                      ) : (
+                        <Shield size={13} style={{ color: "var(--text-muted)" }} />
+                      )}
+                    </button>
+
+                    {/* Vincular a todas as empresas */}
+                    <button
+                      onClick={() => void handleLinkAll(u)}
+                      disabled={isLinking}
+                      title="Vincular a todas as empresas"
+                      className="p-1.5 rounded-lg transition-colors disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                      {isLinking ? (
+                        <Loader2 size={13} className="animate-spin" style={{ color: "var(--text-muted)" }} />
+                      ) : (
+                        <Building2 size={13} style={{ color: "var(--text-muted)" }} />
+                      )}
+                    </button>
+
+                    {/* Reset de senha */}
+                    <button
+                      onClick={() => void handleResetPassword(u.id)}
+                      disabled={isReseting}
+                      title="Enviar e-mail de reset de senha"
+                      className="p-1.5 rounded-lg transition-colors disabled:opacity-40 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                      {isReseting ? (
+                        <Loader2 size={13} className="animate-spin" style={{ color: "var(--text-muted)" }} />
+                      ) : (
+                        <KeyRound size={13} style={{ color: "var(--text-muted)" }} />
+                      )}
+                    </button>
+
+                    {/* Excluir usuário */}
+                    <button
+                      onClick={() => setConfirmDeleteId(u.id)}
+                      disabled={isSelf}
+                      title={isSelf ? "Você não pode excluir a própria conta" : "Excluir usuário"}
+                      className="p-1.5 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:bg-red-500/10"
+                    >
+                      <Trash2 size={13} className={isSelf ? "" : "text-red-400"} style={isSelf ? { color: "var(--text-muted)" } : undefined} />
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
