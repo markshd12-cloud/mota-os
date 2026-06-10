@@ -287,19 +287,29 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ─── Contexto de conhecimento (RAG semântico + fallback + auto-detecção) ─────
+  // ─── Contexto de conhecimento (full-content + RAG suplementar + auto-detecção) ─
   {
     try {
-      // 1. Fontes vinculadas à sessão
+      // 1. Fontes vinculadas à sessão — inclui source_files para fontes baseadas em arquivo
       const { data: rows } = await admin
         .from("session_sources")
-        .select("source_id, knowledge_sources(id, name, type, content, embedding_status)")
+        .select(`
+          source_id,
+          knowledge_sources(
+            id, name, type, content, embedding_status,
+            source_files(extracted_text)
+          )
+        `)
         .eq("session_id", sid)
 
+      type SourceRow = {
+        id: string; name: string; type: string; content: string | null
+        embedding_status: string | null
+        source_files?: { extracted_text: string | null }[] | null
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sources = (rows ?? []).map(r => (r as any).knowledge_sources as {
-        id: string; name: string; type: string; content: string | null; embedding_status: string | null
-      } | null).filter(Boolean) as { id: string; name: string; type: string; content: string | null; embedding_status: string | null }[]
+      const sources = (rows ?? []).map(r => (r as any).knowledge_sources as SourceRow | null)
+        .filter((s): s is SourceRow => Boolean(s))
 
       const sessionSourceIds = new Set(sources.map(s => s.id))
       const indexedIds = sources.filter(s => s.embedding_status === "done").map(s => s.id)
@@ -314,9 +324,9 @@ export async function POST(req: NextRequest) {
 
       const nonSessionIndexed = (allIndexed ?? []).filter(s => !sessionSourceIds.has(s.id))
 
-      // 3. Gera embedding uma vez (usado por RAG selecionado + auto-detecção)
+      // 3. Gera embedding (usado apenas pela auto-detecção de não-selecionadas)
       let queryEmbedding: number[] | null = null
-      if (indexedIds.length > 0 || nonSessionIndexed.length > 0) {
+      if (nonSessionIndexed.length > 0) {
         try {
           queryEmbedding = await embedText(body.user_message.slice(0, 2000))
         } catch (embErr) {
@@ -324,57 +334,69 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      let injectedCtx = false
-
-      // 4. RAG semântico nas fontes selecionadas
-      if (indexedIds.length > 0 && queryEmbedding) {
-        try {
-          const { data: chunks } = await admin.rpc("match_knowledge_chunks", {
-            query_embedding:   `[${queryEmbedding.join(",")}]`,
-            match_count:       8,
-            filter_company:    resolvedCompany,
-            filter_agent_id:   null,
-            filter_source_ids: indexedIds,
-            min_similarity:    0.35,
-          })
-
-          if (chunks && chunks.length > 0) {
-            const parts = (chunks as { title?: string | null; source_type?: string | null; content: string }[])
-              .map(c => `[${c.title ?? c.source_type ?? "Fonte"}]\n${c.content}`)
-            system = (system ?? "") + `\n\nFONTES DE CONHECIMENTO (busca semântica — ${parts.length} trecho(s)):\n${parts.join("\n\n---\n\n")}\n`
-            injectedCtx = true
-
-            void logActivity({
-              userId: user.id, eventType: "source", action: "chat_rag_injected",
-              detail: `${parts.length} trecho(s) semântico(s)`, sessionId: sid as string, companyId: resolvedCompany,
-            })
-          }
-        } catch (ragErr) {
-          console.warn("[chat] RAG falhou, usando fallback full-text:", ragErr)
-        }
-      }
-
-      // 5. Fallback full-text (fontes sem embedding)
-      if (!injectedCtx && sources.length > 0) {
-        const CONTEXT_CHAR_LIMIT = 40_000
-        const parts: string[] = []
+      // 4. Injeção de conteúdo COMPLETO para fontes explicitamente selecionadas
+      // Fontes selecionadas pelo usuário SEMPRE têm todo o conteúdo injetado —
+      // sem depender de busca semântica, sem truncar por similaridade.
+      if (sources.length > 0) {
+        const TOTAL_CHAR_LIMIT    = 120_000  // limite total generoso
+        const PER_SOURCE_LIMIT    = 60_000   // por fonte
+        const contentParts: string[] = []
         let totalChars = 0
+        const sourcesWithoutContent: SourceRow[] = []
 
         for (const src of sources) {
-          if (!src.content) continue
-          const remaining = CONTEXT_CHAR_LIMIT - totalChars
+          // Resolve o texto: coluna content direto ou extracted_text dos arquivos
+          const fileText = src.source_files
+            ?.map(f => f.extracted_text ?? "")
+            .filter(Boolean)
+            .join("\n\n") ?? ""
+          const text = (src.content?.trim() || fileText.trim())
+
+          if (!text) {
+            // Sem texto direto — vai tentar via RAG abaixo
+            if (src.embedding_status === "done") sourcesWithoutContent.push(src)
+            continue
+          }
+
+          const remaining = TOTAL_CHAR_LIMIT - totalChars
           if (remaining <= 0) break
-          const excerpt = src.content.slice(0, remaining)
-          parts.push(`=== ${src.name} (${src.type}) ===\n${excerpt}`)
+          const excerpt = text.slice(0, Math.min(remaining, PER_SOURCE_LIMIT))
+          contentParts.push(`=== ${src.name} (${src.type}) ===\n${excerpt}`)
           totalChars += excerpt.length
         }
 
-        if (parts.length > 0) {
-          system = (system ?? "") + `\n\nFONTES DE CONHECIMENTO ATIVAS:\n${parts.join("\n\n")}\n`
+        if (contentParts.length > 0) {
+          system = (system ?? "") + `\n\nFONTES DE CONHECIMENTO ATIVAS (conteúdo completo):\n${contentParts.join("\n\n")}\n`
           void logActivity({
             userId: user.id, eventType: "source", action: "chat_fulltext_injected",
-            detail: `${parts.length} fonte(s) — ${totalChars} chars`, sessionId: sid as string,
+            detail: `${contentParts.length} fonte(s) — ${totalChars} chars`, sessionId: sid as string, companyId: resolvedCompany,
           })
+        }
+
+        // 5. Para fontes selecionadas sem texto direto (apenas embeddings), usa RAG
+        if (sourcesWithoutContent.length > 0) {
+          try {
+            if (!queryEmbedding) queryEmbedding = await embedText(body.user_message.slice(0, 2000))
+            const { data: chunks } = await admin.rpc("match_knowledge_chunks", {
+              query_embedding:   `[${queryEmbedding!.join(",")}]`,
+              match_count:       12,
+              filter_company:    resolvedCompany,
+              filter_agent_id:   null,
+              filter_source_ids: sourcesWithoutContent.map(s => s.id),
+              min_similarity:    0.2,
+            })
+            if (chunks && chunks.length > 0) {
+              const parts = (chunks as { title?: string | null; source_type?: string | null; content: string }[])
+                .map(c => `[${c.title ?? c.source_type ?? "Fonte"}]\n${c.content}`)
+              system = (system ?? "") + `\n\nFONTES DE CONHECIMENTO (semântico — ${parts.length} trecho(s)):\n${parts.join("\n\n---\n\n")}\n`
+              void logActivity({
+                userId: user.id, eventType: "source", action: "chat_rag_injected",
+                detail: `${parts.length} trecho(s) semântico(s)`, sessionId: sid as string, companyId: resolvedCompany,
+              })
+            }
+          } catch (ragErr) {
+            console.warn("[chat] RAG para fontes sem texto direto falhou:", ragErr)
+          }
         }
       }
 
@@ -394,7 +416,6 @@ export async function POST(req: NextRequest) {
             type AutoChunk = { knowledge_source_id?: string; title?: string | null; source_type?: string | null; content: string }
             const chunkList = autoChunks as AutoChunk[]
 
-            // Mapeia IDs de fonte detectados para nomes
             const sourceMap = new Map(nonSessionIndexed.map(s => [s.id, s.name]))
             const detectedIds = [...new Set(chunkList.map(c => c.knowledge_source_id).filter((id): id is string => Boolean(id)))]
             const detectedNames = detectedIds.map(id => sourceMap.get(id) ?? id)
