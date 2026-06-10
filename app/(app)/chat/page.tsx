@@ -47,13 +47,13 @@ function parseSSE(raw: string): SSEEvent | null {
 }
 
 export default function ChatPage() {
+  const { currentCompany } = useCompany();
+  const companyId = currentCompany?.slug;
   const {
     agents: agentList,
     loading: agentsLoading,
     error: agentsError,
-  } = useAgents();
-  const { currentCompany } = useCompany();
-  const companyId = currentCompany?.slug;
+  } = useAgents(companyId);
 
   const [selectedAgent, setSelectedAgent] = useState<AgentWithConfig | null>(
     null,
@@ -75,9 +75,11 @@ export default function ChatPage() {
     deleteSession,
   } = useSessions(companyId);
 
-  // Limpa a sessão ativa ao trocar de empresa
+  // Limpa a sessão ativa e o agente selecionado ao trocar de empresa
+  // (cada empresa tem seus próprios agentes)
   useEffect(() => {
     setActiveSessionId(null);
+    setSelectedAgent(null);
   }, [companyId]);
 
   const abortRef = useRef<AbortController | null>(null);

@@ -8,7 +8,6 @@ import {
 import { cn } from "@/lib/utils"
 import { AgentSelector } from "./AgentSelector"
 import type { AgentWithConfig } from "@/hooks/useAgents"
-import type { SlashAgentPublic } from "@/lib/slash-agents"
 import { AI_MODE_LIST, type AIMode } from "@/lib/ai/model-registry"
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -314,7 +313,6 @@ export function ChatInput({
   const [pendingSourceIds, setPendingSourceIds]   = useState<string[]>([])
   const [notionPageIds, setNotionPageIds]         = useState<Map<string, string>>(new Map()) // id → title
   const [notionActionMsg, setNotionActionMsg]     = useState<string | null>(null)
-  const [slashAgents, setSlashAgents]             = useState<SlashAgentPublic[]>([])
   const [highlightIdx, setHighlightIdx]         = useState(0)
   const [attachments, setAttachments]           = useState<PendingAttachment[]>([])
   const [uploadErr, setUploadErr]               = useState<string | null>(null)
@@ -361,48 +359,18 @@ export function ChatInput({
     }
   }
 
-  // Carrega slash agents na montagem
-  useEffect(() => {
-    fetch("/api/agents/slash")
-      .then(async (r) => {
-        if (!r.ok) {
-          if (process.env.NODE_ENV === "development") {
-            console.warn("[slash-agents] API retornou", r.status, r.statusText)
-          }
-          return []
-        }
-        const json = await r.json() as unknown
-        if (!Array.isArray(json)) {
-          if (process.env.NODE_ENV === "development") {
-            console.warn("[slash-agents] resposta não é array:", json)
-          }
-          return []
-        }
-        if (process.env.NODE_ENV === "development") {
-          console.log("[slash-agents] carregados:", json.length)
-        }
-        return json as SlashAgentPublic[]
-      })
-      .then((agents) => setSlashAgents(agents))
-      .catch((err) => {
-        if (process.env.NODE_ENV === "development") {
-          console.error("[slash-agents] fetch falhou:", err)
-        }
-      })
-  }, [])
-
-  // Detecta se o input está no modo slash: só "/" ou "/letras" sem espaço
+  // Detecta se o input está no modo slash: só "/" ou "/texto" sem espaço.
+  // O menu "/" lista os AGENTES da empresa atual (não comandos pré-prontos).
   const slashMatch      = /^\/([a-zA-Z0-9_-]*)$/.exec(value)
   const slashMenuActive = slashMatch !== null
   const slashFilter     = slashMatch ? slashMatch[1].toLowerCase() : ""
+  const activeAgents    = (agents ?? []).filter(a => a.status === "active")
   const filteredCmds    = slashMenuActive
-    ? slashAgents.filter(a => !slashFilter || a.command.startsWith(slashFilter))
+    ? activeAgents.filter(a => {
+        if (!slashFilter) return true
+        return `${a.shortName} ${a.name} ${a.id}`.toLowerCase().includes(slashFilter)
+      })
     : []
-
-  if (process.env.NODE_ENV === "development" && slashMenuActive) {
-    // eslint-disable-next-line no-console
-    console.log("[slash-menu] query:", JSON.stringify(slashFilter), "resultados:", filteredCmds.length)
-  }
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (slashMenuActive && filteredCmds.length > 0) {
@@ -414,8 +382,10 @@ export function ChatInput({
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void submit() }
   }
 
-  function selectCommand(agent: SlashAgentPublic) {
-    setValue(`/${agent.command} `)
+  // Selecionar via "/" ativa o agente (carrega prompt + memória via agent_id) e limpa o texto.
+  function selectCommand(agent: AgentWithConfig) {
+    onAgentChange(agent)
+    setValue("")
     setHighlightIdx(0)
     textareaRef.current?.focus()
   }
@@ -506,34 +476,48 @@ export function ChatInput({
     <div className="px-4 py-3 border-t shrink-0"
       style={{ borderColor: "var(--border-color)", background: "var(--bg-sidebar)" }}>
 
-      {/* ── Slash command menu ─────────────────────────────────────────────── */}
+      {/* ── Menu de agentes (/) — apenas agentes da empresa atual ──────────── */}
       <AnimatePresence>
-        {slashMenuActive && filteredCmds.length > 0 && (
+        {slashMenuActive && (
           <motion.div initial={{ opacity: 0, y: 6, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 6, scale: 0.97 }} transition={{ duration: 0.12 }}
             className="mb-2 rounded-xl border shadow-xl overflow-hidden"
             style={{ background: "var(--bg-card)", borderColor: "var(--border-color)" }}>
             <div className="px-3 py-2 border-b text-[10px] font-medium"
               style={{ borderColor: "var(--border-color)", color: "var(--text-muted)" }}>
-              Agentes — ↑↓ navegar · Enter selecionar · Esc fechar
+              Agentes desta empresa — ↑↓ navegar · Enter selecionar · Esc fechar
             </div>
-            <div className="p-1 max-h-56 overflow-y-auto">
-              {filteredCmds.map((cmd, idx) => (
-                <button key={cmd.command} onClick={() => selectCommand(cmd)}
-                  className={cn("w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors",
-                    idx === highlightIdx ? "bg-[var(--bg-hover)]" : "hover:bg-[var(--bg-hover)]")}>
-                  <span className="text-base shrink-0">{cmd.icon}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>{cmd.label}</span>
-                      <span className="text-[10px] font-mono px-1 py-0.5 rounded"
-                        style={{ background: "rgba(139,92,246,0.1)", color: "#a78bfa" }}>/{cmd.command}</span>
-                    </div>
-                    <p className="text-[10px] truncate mt-0.5" style={{ color: "var(--text-muted)" }}>{cmd.description}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
+            {filteredCmds.length === 0 ? (
+              <p className="px-3 py-4 text-center text-[11px]" style={{ color: "var(--text-muted)" }}>
+                {activeAgents.length === 0
+                  ? "Nenhum agente vinculado a esta empresa."
+                  : "Nenhum agente corresponde à busca."}
+              </p>
+            ) : (
+              <div className="p-1 max-h-56 overflow-y-auto">
+                {filteredCmds.map((agent, idx) => {
+                  const Icon = agent.icon
+                  return (
+                    <button key={agent.dbId} onClick={() => selectCommand(agent)}
+                      className={cn("w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors",
+                        idx === highlightIdx ? "bg-[var(--bg-hover)]" : "hover:bg-[var(--bg-hover)]")}>
+                      <span className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center"
+                        style={{ background: agent.bg }}>
+                        <Icon size={14} style={{ color: agent.color }} />
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+                          {agent.shortName || agent.name}
+                        </span>
+                        <p className="text-[10px] truncate mt-0.5" style={{ color: "var(--text-muted)" }}>
+                          {agent.description}
+                        </p>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
