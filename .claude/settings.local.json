@@ -11,7 +11,11 @@
       "Read(//mnt/c/Users/Cppem/**)",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('cross-env' in str\\(d.get\\('dependencies',''\\)\\) + str\\(d.get\\('devDependencies',''\\)\\)\\)\")",
       "PowerShell(\\(Get-Content \"c:\\\\Users\\\\Cppem\\\\mota-os\\\\app\\\\\\(app\\)\\\\settings\\\\page.tsx\" | Measure-Object -Line\\).Lines)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(cd \"/c/Users/Cppem/mota-os\" && ls app/\\\\\\(app\\\\\\)/agents/ components/agents/ app/api/agents/ app/api/agent-files/ app/api/agent-configs/ 2>/dev/null)",
+      "Read(//c/c/Users/Cppem/mota-os/app/\\(app\\)/**)",
+      "Bash(cd \"/c/Users/Cppem/mota-os\" && grep -n \"filter_agent_id\\\\|agent_file\\\\|agentFile\\\\|role_description\\\\|agent_id\" app/api/chat/route.ts | head -30)",
+      "Read(//c/c/Users/Cppem/mota-os/app/api/chat/**)"
     ]
   }
 }

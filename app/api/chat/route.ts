@@ -324,13 +324,49 @@ export async function POST(req: NextRequest) {
 
       const nonSessionIndexed = (allIndexed ?? []).filter(s => !sessionSourceIds.has(s.id))
 
-      // 3. Gera embedding (usado apenas pela auto-detecção de não-selecionadas)
+      // 3. Embedding sob demanda (reusado por: memória do agente, fontes sem texto, auto-detecção)
       let queryEmbedding: number[] | null = null
-      if (nonSessionIndexed.length > 0) {
+      let embeddingTried = false
+      async function ensureEmbedding(): Promise<number[] | null> {
+        if (embeddingTried) return queryEmbedding
+        embeddingTried = true
         try {
           queryEmbedding = await embedText(body.user_message.slice(0, 2000))
         } catch (embErr) {
           console.warn("[chat] Embedding falhou:", embErr)
+        }
+        return queryEmbedding
+      }
+      if (nonSessionIndexed.length > 0) await ensureEmbedding()
+
+      // 3b. MEMÓRIA DO AGENTE — arquivos de memória indexados do agente selecionado
+      // (sem isto, os arquivos enviados na aba "Memória" do agente nunca eram usados)
+      if (body.agent_id) {
+        try {
+          const emb = await ensureEmbedding()
+          if (emb) {
+            // filter_company: null — os arquivos de memória do agente são gravados
+            // com company nula; o agent_id já restringe ao agente correto.
+            const { data: memChunks } = await admin.rpc("match_knowledge_chunks", {
+              query_embedding:   `[${emb.join(",")}]`,
+              match_count:       6,
+              filter_company:    null,
+              filter_agent_id:   body.agent_id,
+              filter_source_ids: null,
+              min_similarity:    0.3,
+            })
+            if (memChunks && memChunks.length > 0) {
+              const parts = (memChunks as { title?: string | null; content: string }[])
+                .map(c => `[${c.title ?? "Memória"}]\n${c.content}`)
+              system = (system ?? "") + `\n\nMEMÓRIA DO AGENTE (arquivos de conhecimento — ${parts.length} trecho(s)):\n${parts.join("\n\n---\n\n")}\n`
+              void logActivity({
+                userId: user.id, eventType: "source", action: "chat_agent_memory_injected",
+                detail: `${parts.length} trecho(s)`, sessionId: sid as string, companyId: resolvedCompany,
+              })
+            }
+          }
+        } catch (memErr) {
+          console.warn("[chat] Memória do agente falhou:", memErr)
         }
       }
 
@@ -409,10 +445,11 @@ export async function POST(req: NextRequest) {
       }
 
       // 6. Auto-detecção: busca fontes relevantes não selecionadas (threshold mais alto)
-      if (nonSessionIndexed.length > 0 && queryEmbedding) {
+      const autoEmb = nonSessionIndexed.length > 0 ? await ensureEmbedding() : null
+      if (autoEmb) {
         try {
           const { data: autoChunks } = await admin.rpc("match_knowledge_chunks", {
-            query_embedding:   `[${queryEmbedding.join(",")}]`,
+            query_embedding:   `[${autoEmb.join(",")}]`,
             match_count:       4,
             filter_company:    resolvedCompany,
             filter_agent_id:   null,

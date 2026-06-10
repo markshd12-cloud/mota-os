@@ -2,9 +2,11 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, Bot, Save, AlertCircle } from "lucide-react"
+import { ArrowLeft, Bot, Save, AlertCircle, FileText, X, Loader2 } from "lucide-react"
 import { useCompany } from "@/components/providers/CompanyProvider"
 import { cn } from "@/lib/utils"
+
+const ALLOWED_EXTS = [".md", ".txt", ".csv", ".json"]
 
 const inputCls = [
   "w-full rounded-xl border px-3 py-2 text-xs outline-none transition-colors",
@@ -35,6 +37,24 @@ export default function NewAgentPage() {
 
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState<string | null>(null)
+
+  // Arquivos de memória escolhidos antes da criação (enviados após criar o agente)
+  const [memFiles, setMemFiles] = useState<File[]>([])
+  const [progress, setProgress] = useState<string | null>(null)
+
+  const addMemFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files ?? [])
+    const valid = picked.filter((f) => {
+      const dot = f.name.lastIndexOf(".")
+      const ext = dot !== -1 ? f.name.slice(dot).toLowerCase() : ""
+      return ALLOWED_EXTS.includes(ext) && f.size <= 20 * 1024 * 1024
+    })
+    setMemFiles((prev) => [...prev, ...valid])
+    e.target.value = ""
+  }
+
+  const removeMemFile = (idx: number) =>
+    setMemFiles((prev) => prev.filter((_, i) => i !== idx))
 
   const set =
     (k: keyof typeof form) =>
@@ -83,11 +103,36 @@ export default function NewAgentPage() {
       const data = await res.json()
       if (!res.ok) { setError(data.error ?? "Erro ao criar agente."); return }
 
+      // Envia e indexa os arquivos de memória escolhidos
+      if (memFiles.length > 0) {
+        for (let i = 0; i < memFiles.length; i++) {
+          const file = memFiles[i]
+          setProgress(`Enviando memória (${i + 1}/${memFiles.length}): ${file.name}`)
+          try {
+            const fd = new FormData()
+            fd.append("file", file)
+            const upRes = await fetch(`/api/agents/${data.id}/files/upload`, { method: "POST", body: fd })
+            if (upRes.ok) {
+              const uploaded = await upRes.json() as { id: string; extracted_text?: string | null }
+              if (uploaded.extracted_text) {
+                setProgress(`Indexando memória (${i + 1}/${memFiles.length}): ${file.name}`)
+                await fetch("/api/rag/index", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ source_type: "agent_file", source_id: uploaded.id }),
+                }).catch(() => null)
+              }
+            }
+          } catch { /* segue para o próximo arquivo */ }
+        }
+      }
+
       router.push(`/agents/${data.id}`)
     } catch {
       setError("Erro de conexão. Tente novamente.")
     } finally {
       setSaving(false)
+      setProgress(null)
     }
   }
 
@@ -216,6 +261,63 @@ export default function NewAgentPage() {
             </Row>
           </Section>
 
+          {/* ── Seção: Memória (arquivos) ── */}
+          <Section title="Memória (arquivos de conhecimento)">
+            <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+              O agente absorve estes arquivos e os usa automaticamente em toda conversa.
+              São indexados ao criar o agente.
+            </p>
+            <label
+              className={cn(
+                "flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 cursor-pointer transition-colors",
+                saving ? "opacity-50 pointer-events-none" : "hover:border-mota-500",
+              )}
+              style={{ borderColor: "var(--border-color)" }}
+            >
+              <FileText size={20} style={{ color: "var(--text-muted)" }} />
+              <p className="mt-2 text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
+                Clique para adicionar arquivos
+              </p>
+              <p className="text-[10px] mt-1" style={{ color: "var(--text-muted)" }}>
+                .md, .txt, .csv, .json · máx 20 MB cada
+              </p>
+              <input type="file" accept=".md,.txt,.csv,.json" multiple className="hidden"
+                onChange={addMemFiles} disabled={saving} />
+            </label>
+
+            {memFiles.length > 0 && (
+              <div className="space-y-2">
+                {memFiles.map((f, idx) => (
+                  <div key={`${f.name}-${idx}`}
+                    className="flex items-center gap-3 rounded-xl border px-3 py-2"
+                    style={{ background: "var(--bg-card)", borderColor: "var(--border-color)" }}>
+                    <FileText size={13} style={{ color: "var(--text-muted)" }} />
+                    <span className="flex-1 min-w-0 truncate text-xs" style={{ color: "var(--text-primary)" }}>
+                      {f.name}
+                    </span>
+                    <span className="text-[10px] shrink-0" style={{ color: "var(--text-muted)" }}>
+                      {(f.size / 1024).toFixed(1)} KB
+                    </span>
+                    {!saving && (
+                      <button type="button" onClick={() => removeMemFile(idx)}
+                        className="p-1 rounded-lg hover:bg-red-500/10 text-red-400 transition-colors">
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Section>
+
+          {/* Progresso de upload */}
+          {progress && (
+            <div className="flex items-center gap-2 text-xs" style={{ color: "var(--text-secondary)" }}>
+              <Loader2 size={13} className="animate-spin" />
+              {progress}
+            </div>
+          )}
+
           {/* Submit */}
           <div className="flex items-center gap-3 pb-4">
             <button
@@ -224,7 +326,9 @@ export default function NewAgentPage() {
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-mota-600 hover:bg-mota-700 disabled:opacity-50 transition-colors"
             >
               <Save size={14} />
-              {saving ? "Criando agente..." : "Criar agente"}
+              {saving
+                ? (memFiles.length > 0 ? "Criando e enviando memória..." : "Criando agente...")
+                : "Criar agente"}
             </button>
             <button
               type="button"
