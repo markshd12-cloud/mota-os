@@ -6,6 +6,7 @@ import { Check, Copy, CheckSquare, Square, Zap, Rocket, RefreshCw } from "lucide
 import { cn } from "@/lib/utils"
 import type { Message, MessageBlock, ChecklistBlock } from "@/lib/mocks/messages"
 import { modelLabel } from "@/lib/ai/model-registry"
+import { MarkdownContent } from "./MarkdownContent"
 
 function extractMessageText(content: MessageBlock[]): string {
   return content
@@ -196,9 +197,9 @@ function MessageBlockRenderer({
       return (
         <div
           className={cn(
-            "px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap",
+            "px-4 py-2.5 rounded-2xl text-sm leading-relaxed",
             isUser
-              ? "bg-mota-600 text-white rounded-tr-sm"
+              ? "bg-mota-600 text-white rounded-tr-sm whitespace-pre-wrap"
               : "rounded-tl-sm"
           )}
           style={!isUser ? {
@@ -207,7 +208,8 @@ function MessageBlockRenderer({
             border: "1px solid var(--border-color)",
           } : {}}
         >
-          {block.content}
+          {/* Usuário: texto puro. IA: markdown renderizado (tabelas, títulos, código...) */}
+          {isUser ? block.content : <MarkdownContent content={block.content} />}
         </div>
       )
 
