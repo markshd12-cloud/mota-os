@@ -48,9 +48,9 @@ CREATE POLICY "jarvis_memories: read" ON jarvis_memories
   USING (
     EXISTS (
       SELECT 1 FROM company_members
-      WHERE company_members.company_id = jarvis_memories.company_id
-        AND company_members.user_id    = auth.uid()
-        AND company_members.status     = 'active'
+      WHERE company_members.company_id::text = jarvis_memories.company_id
+        AND company_members.user_id          = auth.uid()
+        AND company_members.status           = 'active'
     )
     OR EXISTS (
       SELECT 1 FROM profiles
