@@ -82,13 +82,34 @@ export async function POST(
         status:           "active",
         embedding_status: "pending",
         created_by:       user.id,
+        metadata:         { notion_page_id: id },
       })
       .select("id, name")
       .single()
 
     if (error) return NextResponse.json({ error: "Erro ao salvar fonte" }, { status: 500 })
 
-    return NextResponse.json({ source: data })
+    // Indexa imediatamente para entrar na busca semântica (Data Bricks).
+    // Falha de indexação não invalida o save — a fonte fica como "pending".
+    let indexed = false
+    if (content.trim()) {
+      try {
+        const { indexSource } = await import("@/lib/rag/index-source")
+        await indexSource({
+          sourceId:   data.id,
+          sourceType: "knowledge_source",
+          content,
+          title,
+          companyId,
+          createdBy:  user.id,
+        })
+        indexed = true
+      } catch (idxErr) {
+        console.warn("[notion/page POST] indexação falhou:", idxErr)
+      }
+    }
+
+    return NextResponse.json({ source: data, indexed })
   } catch (err) {
     console.error("[notion/page POST]", err)
     return NextResponse.json({ error: "Erro ao importar página" }, { status: 500 })

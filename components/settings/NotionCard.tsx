@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { useCompany } from "@/components/providers/CompanyProvider"
-import { Loader2, CheckCircle2, XCircle, ExternalLink } from "lucide-react"
+import { Loader2, CheckCircle2, XCircle, ExternalLink, RefreshCw } from "lucide-react"
 
 interface NotionStatus {
   connected:      boolean
@@ -29,6 +29,7 @@ export function NotionCard() {
   const [status, setStatus]           = useState<NotionStatus | null>(null)
   const [loading, setLoading]         = useState(true)
   const [disconnecting, setDisconnecting] = useState(false)
+  const [syncing, setSyncing]         = useState(false)
   const [feedback, setFeedback]       = useState<{ type: "success" | "error"; msg: string } | null>(null)
 
   // Captura parâmetros de retorno do callback
@@ -71,6 +72,33 @@ export function NotionCard() {
       setStatus({ connected: false, workspace_name: null, workspace_icon: null, connected_at: null })
     }
     setLoading(false)
+  }
+
+  async function handleSync() {
+    if (!companyId) return
+    setSyncing(true)
+    setFeedback(null)
+    try {
+      const res = await fetch("/api/notion/sync", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ company_id: companyId }),
+      })
+      const data = await res.json() as { ok?: boolean; total?: number; updated?: number; skipped?: number; failed?: number; message?: string; error?: string }
+      if (res.ok && data.ok) {
+        setFeedback({
+          type: "success",
+          msg: data.total === 0
+            ? "Nenhuma fonte do Notion para sincronizar. Importe páginas pelo chat primeiro."
+            : `Sincronizado: ${data.updated} atualizada(s), ${data.skipped} sem mudança${data.failed ? `, ${data.failed} falha(s)` : ""}.`,
+        })
+      } else {
+        setFeedback({ type: "error", msg: data.error ?? "Erro ao sincronizar." })
+      }
+    } catch {
+      setFeedback({ type: "error", msg: "Erro de conexão ao sincronizar." })
+    }
+    setSyncing(false)
   }
 
   async function handleDisconnect() {
@@ -172,6 +200,15 @@ export function NotionCard() {
           </button>
         )}
         <div className="flex-1" />
+        {status?.connected && (
+          <button onClick={() => void handleSync()} disabled={syncing}
+            className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg border transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50 mr-2"
+            style={{ borderColor: "var(--border-color)", color: "var(--text-secondary)" }}
+            title="Re-extrai e re-indexa as fontes do Notion para a busca automática">
+            <RefreshCw size={11} className={syncing ? "animate-spin" : undefined} />
+            {syncing ? "Sincronizando..." : "Sincronizar fontes"}
+          </button>
+        )}
         {status?.connected ? (
           <a href={connectUrl}
             className="flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-lg border transition-colors hover:bg-[var(--bg-hover)]"

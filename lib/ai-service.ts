@@ -66,6 +66,29 @@ async function getAnthropicClient() {
   })
 }
 
+// ─── Chamada não-streaming (planner, classificação, etc.) ─────────────────────
+// Usada para passos rápidos e baratos (ex: roteamento de busca com Haiku).
+// Apenas Anthropic por enquanto — suficiente para tarefas internas.
+
+export async function completeText(params: {
+  messages:   { role: "user" | "assistant"; content: string }[]
+  system?:    string
+  model?:     string
+  maxTokens?: number
+}): Promise<string> {
+  const client = await getAnthropicClient()
+  const res = await client.messages.create({
+    model:      params.model ?? "claude-haiku-4-5",
+    max_tokens: params.maxTokens ?? 512,
+    system:     params.system,
+    messages:   params.messages,
+  })
+  return res.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map(b => b.text)
+    .join("")
+}
+
 // ─── Entry point público ──────────────────────────────────────────────────────
 
 export async function* streamChat(params: AIStreamParams): AsyncGenerator<AIChunk> {

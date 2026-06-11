@@ -394,3 +394,60 @@ export async function searchPages(notion: Client, query?: string): Promise<Notio
     }
   })
 }
+
+// ─── Busca automática ao vivo (Data Bricks) ───────────────────────────────────
+// Dado termos de busca, encontra as páginas/databases mais relevantes e extrai
+// o conteúdo. Usado quando o usuário NÃO selecionou fonte mas pediu dados.
+
+export interface NotionLiveResult {
+  title:   string
+  content: string
+  url:     string
+}
+
+export async function searchAndFetch(
+  notion: Client,
+  queries: string[],
+  opts: { maxPages?: number; maxCharsPerPage?: number } = {},
+): Promise<NotionLiveResult[]> {
+  const maxPages = opts.maxPages ?? 2
+  const maxChars = opts.maxCharsPerPage ?? 12_000
+
+  // Agrega resultados de todas as queries, deduplica por id
+  const seen = new Set<string>()
+  const candidates: NotionPage[] = []
+  for (const q of queries.slice(0, 3)) {
+    if (!q.trim()) continue
+    let pages: NotionPage[] = []
+    try { pages = await searchPages(notion, q.trim()) } catch { continue }
+    for (const p of pages) {
+      if (seen.has(p.id)) continue
+      seen.add(p.id)
+      candidates.push(p)
+    }
+  }
+
+  // Ranqueia: títulos que casam com os termos da busca + databases ganham prioridade
+  // (ex: "cadastro de alunos" deve trazer o DATABASE, não páginas soltas de alunos).
+  const terms = queries.join(" ").toLowerCase().split(/\s+/).filter(t => t.length > 2)
+  const score = (p: NotionPage): number => {
+    const t = p.title.toLowerCase()
+    let s = 0
+    for (const term of terms) if (t.includes(term)) s += 2
+    if (p.type === "database") s += 3   // databases costumam ser a fonte de dados pedida
+    return s
+  }
+  const ranked = [...candidates].sort((a, b) => score(b) - score(a))
+
+  // Extrai conteúdo das melhores
+  const results: NotionLiveResult[] = []
+  for (const page of ranked.slice(0, maxPages)) {
+    try {
+      const { title, content } = await fetchPageContent(notion, page.id)
+      if (content.trim()) {
+        results.push({ title, content: content.slice(0, maxChars), url: page.url })
+      }
+    } catch { /* ignora páginas sem acesso */ }
+  }
+  return results
+}

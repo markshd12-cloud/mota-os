@@ -515,6 +515,37 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ─── Data Bricks: busca automática no Notion ao vivo ─────────────────────────
+  // Quando o usuário NÃO selecionou página do Notion mas pediu dados, o Jarvis
+  // decide (planner Haiku) se vale buscar e procura ao vivo no Notion da empresa.
+  if (!body.notion_page_ids || body.notion_page_ids.length === 0) {
+    try {
+      const { getNotionClientForCompany, searchAndFetch } = await import("@/lib/notion")
+      const notion = await getNotionClientForCompany(resolvedCompany)
+      if (notion) {
+        const { planRetrieval } = await import("@/lib/ai/retrieval-planner")
+        const plan = await planRetrieval(body.user_message)
+        if (plan.search) {
+          const results = await searchAndFetch(notion, plan.queries, { maxPages: 2, maxCharsPerPage: 12_000 })
+          if (results.length > 0) {
+            const parts = results.map(r => `=== Notion: ${r.title} ===\n${r.content}`)
+            const names = results.map(r => r.title).join(", ")
+            system = (system ?? "")
+              + `\n\nDADOS ENCONTRADOS AUTOMATICAMENTE NO NOTION (busca: ${plan.queries.join(", ")}):\n`
+              + parts.join("\n\n")
+              + `\n\nInstrução ao assistente: estes dados foram localizados automaticamente no Notion a partir do pedido. Use-os para responder e mencione brevemente que buscou em: ${names}.\n`
+            void logActivity({
+              userId: user.id, eventType: "source", action: "chat_notion_autosearch",
+              detail: `${results.length} página(s) — ${plan.queries.join(", ")}`, sessionId: sid as string, companyId: resolvedCompany,
+            })
+          }
+        }
+      }
+    } catch (autoNotionErr) {
+      console.warn("[chat] Notion auto-search failed:", autoNotionErr)
+    }
+  }
+
   // ─── Contexto de anexos ───────────────────────────────────────────────────
   if (body.attachment_ids && body.attachment_ids.length > 0) {
     try {
