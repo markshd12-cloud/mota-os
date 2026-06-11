@@ -515,34 +515,78 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ─── Data Bricks: busca automática no Notion ao vivo ─────────────────────────
-  // Quando o usuário NÃO selecionou página do Notion mas pediu dados, o Jarvis
-  // decide (planner Haiku) se vale buscar e procura ao vivo no Notion da empresa.
+  // ─── Data Bricks: tool router multi-fonte ────────────────────────────────────
+  // O Jarvis decide (planner Haiku) em QUAIS fontes buscar conforme o pedido e
+  // executa os retrievers escolhidos. Extensível: registrar uma fonte = adicionar
+  // ao array `tools` + um case no switch de execução.
   if (!body.notion_page_ids || body.notion_page_ids.length === 0) {
     try {
       const { getNotionClientForCompany, searchAndFetch } = await import("@/lib/notion")
       const notion = await getNotionClientForCompany(resolvedCompany)
+
+      // Registry de ferramentas disponíveis para esta requisição
+      const tools: { id: string; description: string }[] = [
+        { id: "knowledge_base", description: "Fontes de conhecimento internas já importadas e indexadas da empresa: playbooks, fichas, cadastros, documentos, páginas do Notion salvas." },
+      ]
       if (notion) {
-        const { planRetrieval } = await import("@/lib/ai/retrieval-planner")
-        const plan = await planRetrieval(body.user_message)
-        if (plan.search) {
-          const results = await searchAndFetch(notion, plan.queries, { maxPages: 2, maxCharsPerPage: 12_000 })
-          if (results.length > 0) {
-            const parts = results.map(r => `=== Notion: ${r.title} ===\n${r.content}`)
-            const names = results.map(r => r.title).join(", ")
-            system = (system ?? "")
-              + `\n\nDADOS ENCONTRADOS AUTOMATICAMENTE NO NOTION (busca: ${plan.queries.join(", ")}):\n`
-              + parts.join("\n\n")
-              + `\n\nInstrução ao assistente: estes dados foram localizados automaticamente no Notion a partir do pedido. Use-os para responder e mencione brevemente que buscou em: ${names}.\n`
-            void logActivity({
-              userId: user.id, eventType: "source", action: "chat_notion_autosearch",
-              detail: `${results.length} página(s) — ${plan.queries.join(", ")}`, sessionId: sid as string, companyId: resolvedCompany,
+        tools.push({ id: "notion", description: "Páginas e bases de dados do Notion da empresa, ao vivo (inclui dados ainda não importados/indexados)." })
+      }
+
+      const { routeTools } = await import("@/lib/ai/tool-router")
+      const calls = await routeTools(body.user_message, tools)
+
+      for (const call of calls) {
+        // ── Ferramenta: base de conhecimento (RAG semântico) ──
+        if (call.tool === "knowledge_base") {
+          try {
+            const emb = await embedText(call.queries.join(" ").slice(0, 2000))
+            const { data: chunks } = await admin.rpc("match_knowledge_chunks", {
+              query_embedding:   `[${emb.join(",")}]`,
+              match_count:       6,
+              filter_company:    resolvedCompany,
+              filter_agent_id:   null,
+              filter_source_ids: null,
+              min_similarity:    0.35,
             })
+            if (chunks && chunks.length > 0) {
+              const parts = (chunks as { title?: string | null; content: string }[])
+                .map(c => `[${c.title ?? "Fonte"}]\n${c.content}`)
+              system = (system ?? "")
+                + `\n\nBASE DE CONHECIMENTO (busca: ${call.queries.join(", ")} — ${parts.length} trecho(s)):\n`
+                + parts.join("\n\n---\n\n") + "\n"
+              void logActivity({
+                userId: user.id, eventType: "source", action: "chat_router_knowledge_base",
+                detail: `${parts.length} trecho(s) — ${call.queries.join(", ")}`, sessionId: sid as string, companyId: resolvedCompany,
+              })
+            }
+          } catch (kbErr) {
+            console.warn("[chat] tool knowledge_base falhou:", kbErr)
+          }
+        }
+
+        // ── Ferramenta: Notion ao vivo ──
+        else if (call.tool === "notion" && notion) {
+          try {
+            const results = await searchAndFetch(notion, call.queries, { maxPages: 2, maxCharsPerPage: 12_000 })
+            if (results.length > 0) {
+              const parts = results.map(r => `=== Notion: ${r.title} ===\n${r.content}`)
+              const names = results.map(r => r.title).join(", ")
+              system = (system ?? "")
+                + `\n\nDADOS ENCONTRADOS NO NOTION (busca: ${call.queries.join(", ")}):\n`
+                + parts.join("\n\n")
+                + `\n\nInstrução ao assistente: dados localizados automaticamente no Notion. Use-os e mencione brevemente que buscou em: ${names}.\n`
+              void logActivity({
+                userId: user.id, eventType: "source", action: "chat_router_notion",
+                detail: `${results.length} página(s) — ${call.queries.join(", ")}`, sessionId: sid as string, companyId: resolvedCompany,
+              })
+            }
+          } catch (nErr) {
+            console.warn("[chat] tool notion falhou:", nErr)
           }
         }
       }
-    } catch (autoNotionErr) {
-      console.warn("[chat] Notion auto-search failed:", autoNotionErr)
+    } catch (routerErr) {
+      console.warn("[chat] tool router falhou:", routerErr)
     }
   }
 
