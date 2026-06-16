@@ -314,7 +314,7 @@ const fadeUp = {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function DashboardPage() {
+export default function DashboardView() {
   const { currentCompany, loading: companyLoading, isAdmin, userRole } = useCompany()
   const router = useRouter()
   const [period,   setPeriod]   = useState<Period>("7d")

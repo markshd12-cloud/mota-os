@@ -58,14 +58,8 @@ const ALL_NAV_ITEMS: NavItem[] = [
     label: "Automações",
     icon: Zap,
     children: [
-      { label: "Skills", href: "/automations?tab=skills", icon: Puzzle },
+      { label: "Agentes", href: "/automations?tab=skills", icon: Puzzle },
       { label: "Workflows", href: "/workflows", icon: GitBranch },
-      {
-        label: "Agendamentos",
-        href: "/automations?tab=schedules",
-        icon: CalendarClock,
-      },
-      { label: "Vigias", href: "/automations?tab=watchers", icon: Eye },
     ],
   },
 ];

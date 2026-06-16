@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
         email.toLowerCase().trim(),
         {
           data: { name: name.trim() },
-          redirectTo: `${origin}/reset-password`,
+          redirectTo: `${origin}/auth/confirm?next=/reset-password`,
         },
       )
 

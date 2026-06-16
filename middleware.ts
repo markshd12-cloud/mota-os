@@ -24,7 +24,6 @@ function isCsrfSafe(request: NextRequest): boolean {
 }
 
 export async function middleware(request: NextRequest) {
-  // Rejeitar mutations com Origin diferente do host (CSRF)
   if (!isCsrfSafe(request)) {
     return NextResponse.json({ error: "Origem inválida." }, { status: 403 });
   }
@@ -114,6 +113,21 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/change-password";
     return NextResponse.redirect(url);
+  }
+
+  const isDashboardRoute =
+    pathname === "/dashboard" || pathname.startsWith("/dashboard/");
+  if (user && isDashboardRoute) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    if (profile?.role !== "admin") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/chat";
+      return NextResponse.redirect(url);
+    }
   }
 
   return supabaseResponse;
