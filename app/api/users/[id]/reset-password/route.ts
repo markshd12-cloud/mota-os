@@ -35,9 +35,10 @@ export async function POST(
     ?? process.env.NEXT_PUBLIC_APP_URL
     ?? ""
 
-  // generateLink envia o e-mail automaticamente via SMTP configurado no Supabase.
-  // Nunca expor action_link ao frontend.
-  const { error: linkError } = await admin.auth.admin.generateLink({
+  // generateLink gera o link de recuperação e tenta enviar por e-mail (via SMTP,
+  // se configurado). O action_link é retornado para o admin copiar e enviar
+  // manualmente (WhatsApp etc.) quando o SMTP ainda não estiver configurado.
+  const { data: linkData, error: linkError } = await admin.auth.admin.generateLink({
     type: "recovery",
     email: profile.email,
     options: { redirectTo: `${origin}/reset-password` },
@@ -46,21 +47,24 @@ export async function POST(
   if (linkError) {
     console.error("[users/reset-password] generateLink error:", linkError.message)
     return NextResponse.json(
-      { error: "Erro ao gerar link de reset. Verifique as configurações de SMTP no Supabase." },
+      { error: "Erro ao gerar link de reset." },
       { status: 500 },
     )
   }
+
+  const actionLink = linkData?.properties?.action_link ?? null
 
   void logActivity({
     userId:    user.id,
     eventType: "settings",
     action:    "user_password_reset_sent",
-    detail:    `Reset de senha enviado para ${profile.email}`,
+    detail:    `Reset de senha gerado para ${profile.email}`,
     metadata:  { target_user_id: targetId },
   })
 
   return NextResponse.json({
     ok: true,
-    message: `E-mail de reset enviado para ${profile.email}. O usuário receberá instruções para definir uma nova senha.`,
+    link: actionLink,
+    message: `Link de acesso gerado para ${profile.email}. Se o e-mail não chegar, copie o link abaixo e envie ao usuário.`,
   })
 }

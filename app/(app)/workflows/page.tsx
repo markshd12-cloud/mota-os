@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { GitBranch, Search, Plus, Loader2, AlertCircle, RefreshCw } from "lucide-react"
 import { PageHeader } from "@/components/ui/PageHeader"
+import { EmptyState } from "@/components/ui/EmptyState"
 import { WorkflowCard } from "@/components/workflows/WorkflowCard"
 import { WorkflowModal } from "@/components/workflows/WorkflowModal"
 import { WorkflowCreateModal } from "@/components/workflows/WorkflowCreateModal"
@@ -190,24 +191,24 @@ export default function WorkflowsPage() {
           {!loading && !fetchErr && (
             <AnimatePresence mode="popLayout">
               {filtered.length === 0 ? (
-                <motion.div
-                  key="empty"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="flex flex-col items-center justify-center py-20 gap-3"
-                >
-                  <GitBranch size={32} style={{ color: "var(--text-muted)" }} />
-                  <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-                    {search ? "Nenhum workflow encontrado para essa busca" : "Nenhum workflow criado ainda"}
-                  </p>
-                  {!search && (
-                    <button
-                      onClick={() => setCreating(true)}
-                      className="flex items-center gap-1.5 text-xs px-4 py-2 rounded-xl border transition-colors hover:bg-[var(--bg-hover)]"
-                      style={{ borderColor: "var(--border-color)", color: "var(--text-secondary)" }}
-                    >
-                      <Plus size={12} /> Criar primeiro workflow
-                    </button>
+                <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                  {search ? (
+                    <EmptyState
+                      icon={Search}
+                      title="Nenhum workflow encontrado"
+                      description="Tente outro termo de busca ou ajuste os filtros."
+                    />
+                  ) : (
+                    <EmptyState
+                      icon={GitBranch}
+                      title="Nenhum workflow criado ainda"
+                      description="Automatize tarefas repetitivas encadeando ações em fluxos disparados por eventos ou agendamentos."
+                      action={{
+                        label:   "Criar primeiro workflow",
+                        icon:    Plus,
+                        onClick: () => setCreating(true),
+                      }}
+                    />
                   )}
                 </motion.div>
               ) : (

@@ -39,6 +39,8 @@ export interface Message {
   regeneratedFrom?:  string   // assistant_message_id original
   // Anexos
   attachmentIds?:    string[]
+  // Feedback do usuário: null = sem feedback, 1 = 👍, -1 = 👎
+  feedback?:         number | null
 }
 
 // ── Sessão s1: Criar campanha Intensivão PMPE ─────────────────────────────

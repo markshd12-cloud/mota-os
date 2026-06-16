@@ -35,6 +35,7 @@ function mapRow(row: any): Message {
     slashAgentLabel: blocks?.slashAgentLabel ?? undefined,
     aiMode:          blocks?.aiMode          ?? undefined,
     routedByJarvis:  blocks?.routedByJarvis  ?? undefined,
+    feedback:        (row.feedback as number | null) ?? null,
   }
 }
 
@@ -48,13 +49,28 @@ export function useMessages(sessionId: string | null) {
   const load = useCallback(async (id: string) => {
     setLoading(true)
     const supabase = createClient()
-    const { data } = await supabase
+    const COLS_WITH_FEEDBACK = "id, session_id, role, content, created_at, model_used, provider, blocks, feedback, agent:agents(short_name, color)"
+    const COLS_BASE          = "id, session_id, role, content, created_at, model_used, provider, blocks, agent:agents(short_name, color)"
+
+    const primary = await supabase
       .from("messages")
-      .select("id, session_id, role, content, created_at, model_used, provider, blocks, agent:agents(short_name, color)")
+      .select(COLS_WITH_FEEDBACK)
       .eq("session_id", id)
       .order("created_at", { ascending: true })
 
-    setMessages((data ?? []).map(mapRow))
+    // Fallback: coluna feedback ainda não existe (migration não aplicada)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let rows: any[] | null = primary.data
+    if (primary.error) {
+      const fb = await supabase
+        .from("messages")
+        .select(COLS_BASE)
+        .eq("session_id", id)
+        .order("created_at", { ascending: true })
+      rows = fb.data
+    }
+
+    setMessages((rows ?? []).map(mapRow))
     setLoading(false)
   }, [])
 

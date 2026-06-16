@@ -2,10 +2,20 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { logActivity }       from "@/lib/activity-logger"
+import { rateLimit, getClientIp, RATE_LIMITS } from "@/lib/rate-limit"
 
 export const dynamic = "force-dynamic"
 
 export async function POST(req: NextRequest) {
+  const ip = getClientIp(req)
+  const rl  = rateLimit(`auth-login:${ip}`, RATE_LIMITS.authLogin)
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: `Muitas tentativas. Tente novamente em ${Math.ceil(rl.resetIn / 60)} minutos.` },
+      { status: 429, headers: { "Retry-After": String(rl.resetIn) } },
+    )
+  }
+
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 })

@@ -30,6 +30,9 @@ export const RATE_LIMITS = {
   auth_login:      { limit: 10, windowMs: 15 * 60_000 },
   auth_magic_link: { limit: 5,  windowMs: 15 * 60_000 },
   auth_recovery:   { limit: 5,  windowMs: 15 * 60_000 },
+  // Chaves usadas pelas rotas server-side (email-login / email-reset)
+  authLogin:       { limit: 5,  windowMs:     900_000 }, // 5 tentativas em 15 min
+  authReset:       { limit: 3,  windowMs:   3_600_000 }, // 3 tentativas em 1 hora
 } as const
 
 // ─── Auth rate limit habilitado? ──────────────────────────────────────────────
