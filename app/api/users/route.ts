@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
         email.toLowerCase().trim(),
         {
           data: { name: name.trim() },
-          redirectTo: `${origin}/reset-password`,
+          redirectTo: `${origin}/auth/confirm?next=/reset-password`,
         },
       )
 
@@ -185,20 +185,32 @@ export async function POST(req: NextRequest) {
 
     // Cria/atualiza perfil. Sem ignoreDuplicates para sobrescrever dados
     // gerados por trigger com nome e empresa corretos.
-    const { error: profileError } = await admin.from("profiles").upsert(
-      {
-        id: newUserId,
-        email: email.toLowerCase().trim(),
-        name: name.trim(),
-        avatar_url: avatarUrl,
-        role: "viewer",
-        default_company_id: companyId,
-        must_change_password: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "id" },
-    );
+    const baseProfile: Record<string, unknown> = {
+      id: newUserId,
+      email: email.toLowerCase().trim(),
+      name: name.trim(),
+      avatar_url: avatarUrl,
+      role: "viewer",
+      default_company_id: companyId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    let { error: profileError } = await admin
+      .from("profiles")
+      .upsert({ ...baseProfile, must_change_password: false }, { onConflict: "id" });
+
+    // Fallback: coluna must_change_password ainda não existe (migration
+    // 20260605000002_profiles_security não aplicada ou schema cache desatualizado)
+    if (
+      profileError &&
+      (profileError.message.includes("must_change_password") ||
+        profileError.message.includes("schema cache"))
+    ) {
+      ({ error: profileError } = await admin
+        .from("profiles")
+        .upsert(baseProfile, { onConflict: "id" }));
+    }
 
     if (profileError) {
       // Se falhar, deletar usuário de auth

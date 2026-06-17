@@ -3,8 +3,29 @@ import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { isGlobalAdmin, getAllowedCompanyIds, ALL_SLUGS } from "@/lib/company-scope"
 import { logActivity } from "@/lib/activity-logger"
+import { indexSource } from "@/lib/rag/index-source"
 
 export const dynamic = "force-dynamic"
+
+/** Indexa a fonte para RAG (best-effort — nunca derruba a requisição). */
+async function reindexKnowledgeSource(
+  id: string, content: string, title: string, companyId: string, userId: string,
+): Promise<void> {
+  if (!content.trim()) return
+  try {
+    await indexSource({
+      sourceId:     id,
+      sourceType:   "knowledge_source",
+      content,
+      title,
+      companyId,
+      createdBy:    userId,
+      forceReindex: true,
+    })
+  } catch (err) {
+    console.warn("[knowledge-sources] indexação RAG falhou:", err instanceof Error ? err.message : err)
+  }
+}
 
 const VALID_TYPES = [
   "playbook","faq","script","product_info","brand_voice",
@@ -111,6 +132,9 @@ export async function POST(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
 
+  // Indexa para busca semântica (RAG) — sem isto a fonte não aparece nas buscas.
+  await reindexKnowledgeSource(data.id, content, name.trim(), company_id, user.id)
+
   void logActivity({
     userId:    user.id,
     eventType: "settings",
@@ -178,6 +202,14 @@ export async function PATCH(req: NextRequest) {
     .single()
 
   if (error) return NextResponse.json({ error: "Erro interno no servidor" }, { status: 500 })
+
+  // Reindexa quando conteúdo ou nome (usado como prefixo do embedding) mudou.
+  if ("content" in updates || "name" in updates) {
+    await reindexKnowledgeSource(
+      data.id, (data.content as string) ?? "", (data.name as string) ?? "",
+      existing.company_id, user.id,
+    )
+  }
 
   void logActivity({
     userId:    user.id,

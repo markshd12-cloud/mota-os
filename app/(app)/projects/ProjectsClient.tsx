@@ -8,6 +8,7 @@ import {
   ChevronDown, Archive,
 } from "lucide-react"
 import { PageHeader }  from "@/components/ui/PageHeader"
+import { EmptyState }  from "@/components/ui/EmptyState"
 import { ProjectCard } from "@/components/projects/ProjectCard"
 import { useCompany }  from "@/components/providers/CompanyProvider"
 import type { ApiProject } from "@/lib/project-helpers"
@@ -284,10 +285,16 @@ export function ProjectsClient() {
               <span className="text-sm" style={{ color: "var(--text-muted)" }}>Carregando projetos...</span>
             </div>
           ) : uiProjects.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 gap-3">
-              <FolderOpen size={32} style={{ color: "var(--text-muted)" }} />
-              <p className="text-sm" style={{ color: "var(--text-muted)" }}>Nenhum projeto encontrado</p>
-            </div>
+            <EmptyState
+              icon={FolderOpen}
+              title="Nenhum projeto ainda"
+              description="Organize seu trabalho em projetos e conecte conversas, fontes e tarefas a eles."
+              action={{
+                label:   "Criar primeiro projeto",
+                icon:    Plus,
+                onClick: () => { setCreating(true); setForm(EMPTY_FORM); setFormError("") },
+              }}
+            />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {uiProjects.map((p, i) => (

@@ -155,10 +155,12 @@ async function dispatch(
       // Novo: contar falhas de workflow nas últimas N horas
       const hours = Number(condition.lookback_hours ?? condition.hours ?? 24)
       const since = new Date(Date.now() - hours * 3_600_000).toISOString()
+      // A execução de workflow grava status 'error'; 'failed' é aceito por
+      // compatibilidade com o check constraint (ambos representam falha).
       const { data, error } = await admin
         .from('workflow_runs')
         .select('id, workflow_name, created_at, error_message')
-        .eq('status', 'failed')
+        .in('status', ['error', 'failed'])
         .gte('created_at', since)
         .order('created_at', { ascending: false })
         .limit(20)

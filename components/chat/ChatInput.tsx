@@ -474,7 +474,11 @@ export function ChatInput({
 
   return (
     <div className="px-4 py-3 border-t shrink-0"
-      style={{ borderColor: "var(--border-color)", background: "var(--bg-sidebar)" }}>
+      style={{
+        borderColor:    "var(--border-color)",
+        background:     "var(--bg-sidebar)",
+        paddingBottom:  "max(0.75rem, env(safe-area-inset-bottom))",
+      }}>
 
       {/* ── Menu de agentes (/) — apenas agentes da empresa atual ──────────── */}
       <AnimatePresence>
@@ -585,6 +589,7 @@ export function ChatInput({
         <textarea ref={textareaRef} value={value} onChange={handleInput} onKeyDown={handleKeyDown}
           placeholder="Mensagem para o Jarvis... (/ para ativar agentes)"
           disabled={disabled} rows={1}
+          inputMode="text" enterKeyHint="send"
           className={cn("w-full bg-transparent resize-none px-4 pt-3.5 pb-1 text-sm outline-none",
             "placeholder:text-[var(--text-muted)]", disabled && "opacity-50 cursor-not-allowed")}
           style={{ color: "var(--text-primary)", maxHeight: 140, minHeight: 44 }} />

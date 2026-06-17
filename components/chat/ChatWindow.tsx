@@ -11,6 +11,7 @@ import {
   LogIn,
   Copy,
   LogOut,
+  PanelLeftOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ChatMessage } from "./ChatMessage";
@@ -46,6 +47,7 @@ interface ChatWindowProps {
   onRegenerate?: (messageId: string) => void;
   onToggleRightPanel: () => void;
   onSourcesChanged?: () => void;
+  onToggleSessions?: () => void;   // mobile: abre o drawer de sessões
   agents?: AgentWithConfig[];
 }
 
@@ -88,6 +90,7 @@ export function ChatWindow({
   onRegenerate,
   onToggleRightPanel,
   onSourcesChanged,
+  onToggleSessions,
   agents,
 }: ChatWindowProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -311,6 +314,14 @@ export function ChatWindow({
     }
   }
 
+  // O placeholder vazio do assistente já renderiza "🔍 Pesquisando nas fontes...".
+  // Quando ele está visível, não mostramos também o indicador de digitação ("...")
+  // para evitar dois balões duplicados antes da resposta.
+  const lastMessage = messages[messages.length - 1];
+  const searchingPlaceholderVisible =
+    lastMessage?.role === "assistant" &&
+    lastMessage.content.some((b) => b.kind === "text" && b.content === "");
+
   return (
     <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
       {/* Chat header */}
@@ -321,6 +332,18 @@ export function ChatWindow({
           background: "var(--bg-sidebar)",
         }}
       >
+        {onToggleSessions && (
+          <button
+            onClick={onToggleSessions}
+            className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors hover:bg-[var(--bg-hover)] shrink-0"
+            style={{ color: "var(--text-muted)" }}
+            title="Ver sessões"
+            aria-label="Ver sessões"
+          >
+            <PanelLeftOpen size={16} />
+          </button>
+        )}
+
         <div className="flex-1 min-w-0">
           <p
             className="text-sm font-semibold truncate"
@@ -456,7 +479,7 @@ export function ChatWindow({
             ))}
 
             <AnimatePresence>
-              {isTyping && (
+              {isTyping && !searchingPlaceholderVisible && (
                 <TypingIndicator
                   agentName={selectedAgent?.name ?? "Jarvis"}
                   agentColor={selectedAgent?.color ?? "#16a34a"}

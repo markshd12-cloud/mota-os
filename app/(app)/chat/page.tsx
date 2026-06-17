@@ -1,9 +1,13 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { showError } from "@/lib/toast";
 import { SessionList } from "@/components/chat/SessionList";
 import { ChatWindow } from "@/components/chat/ChatWindow";
 import { RightContextPanel } from "@/components/chat/RightContextPanel";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { AnimatePresence, motion } from "framer-motion";
 import { useAgents, type AgentWithConfig } from "@/hooks/useAgents";
 import { useSessions } from "@/hooks/useSessions";
 import { useMessages } from "@/hooks/useMessages";
@@ -21,6 +25,7 @@ interface SSEDelta {
 interface SSEDone {
   type: "done";
   session_id: string;
+  message_id: string | null;
   model: string;
   provider: string;
   usage: { input_tokens: number; output_tokens: number };
@@ -53,6 +58,9 @@ function parseSSE(raw: string): SSEEvent | null {
 export default function ChatPage() {
   const { currentCompany } = useCompany();
   const companyId = currentCompany?.slug;
+
+  const isMobile = useIsMobile();
+  const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
   const {
     agents: agentList,
     loading: agentsLoading,
@@ -86,6 +94,11 @@ export default function ChatPage() {
     setSelectedAgent(null);
   }, [companyId]);
 
+  // Em mobile o painel direito começa fechado (evita espremer o chat)
+  useEffect(() => {
+    if (isMobile) setRightPanelOpen(false);
+  }, [isMobile]);
+
   const abortRef = useRef<AbortController | null>(null);
 
   const activeSession = sessions.find(s => s.id === activeSessionId) ?? null;
@@ -112,11 +125,13 @@ export default function ChatPage() {
       ? (agentList.find(a => a.shortName === agentName) ?? null)
       : null;
     setSelectedAgent(matched);
+    setMobileSessionsOpen(false); // fecha o drawer em mobile
   }
 
   function newSession() {
     setActiveSessionId(null);
     setSelectedAgent(null); // nova sessão começa sem agente pré-selecionado
+    setMobileSessionsOpen(false);
   }
 
   async function handleArchive(id: string): Promise<boolean> {
@@ -271,12 +286,14 @@ export default function ChatPage() {
                 );
               } else if (event.type === "done") {
                 pendingSid = event.session_id;
-                // Atualiza a mensagem IA com o modelo/provider usado
+                // Atualiza a mensagem IA com o modelo/provider usado e o id real
+                // do banco (necessário para habilitar o feedback 👍/👎)
                 setMessages(prev =>
                   prev.map(m =>
                     m.id === aiMsgId
                       ? {
                           ...m,
+                          id: event.message_id ?? m.id,
                           modelUsed: event.model,
                           providerUsed: event.provider,
                           routedByJarvis: aiMode === "jarvis",
@@ -342,6 +359,7 @@ export default function ChatPage() {
                 : m,
             ),
           );
+          showError("Erro ao conectar com a IA. Verifique sua conexão e tente novamente.");
         }
       } finally {
         setIsTyping(false);
@@ -406,37 +424,81 @@ export default function ChatPage() {
     );
   }
 
+  const sessionListNode = (
+    <SessionList
+      activeId={activeSessionId ?? ""}
+      sessions={sessions}
+      loading={sessionsLoading}
+      onSelect={selectSession}
+      onNewSession={newSession}
+      onRename={renameSession}
+      onTogglePinned={togglePinned}
+      onArchive={handleArchive}
+      onUnarchive={unarchiveSession}
+      onDelete={handleDelete}
+    />
+  )
+
   return (
     <div className="flex h-full overflow-hidden">
-      <SessionList
-        activeId={activeSessionId ?? ""}
-        sessions={sessions}
-        loading={sessionsLoading}
-        onSelect={selectSession}
-        onNewSession={newSession}
-        onRename={renameSession}
-        onTogglePinned={togglePinned}
-        onArchive={handleArchive}
-        onUnarchive={unarchiveSession}
-        onDelete={handleDelete}
-      />
+      {/* Sessões — inline no desktop, drawer no mobile */}
+      {!isMobile && (
+        <ErrorBoundary label="Sessões">
+          {sessionListNode}
+        </ErrorBoundary>
+      )}
 
-      <ChatWindow
-        sessionId={activeSessionId}
-        sessionTitle={activeSession?.title}
-        sessionCompany={activeSession?.company}
-        companyId={companyId}
-        messages={messages}
-        isTyping={isTyping}
-        selectedAgent={selectedAgent}
-        rightPanelOpen={rightPanelOpen}
-        onAgentChange={handleAgentChange}
-        onSend={handleSend}
-        onRegenerate={handleRegenerate}
-        onToggleRightPanel={() => setRightPanelOpen(v => !v)}
-        onSourcesChanged={() => setSourcesVersion(v => v + 1)}
-        agents={agentList}
-      />
+      {isMobile && (
+        <>
+          <AnimatePresence>
+            {mobileSessionsOpen && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                onClick={() => setMobileSessionsOpen(false)}
+                className="fixed inset-0 z-40 bg-black/50"
+              />
+            )}
+          </AnimatePresence>
+          <AnimatePresence>
+            {mobileSessionsOpen && (
+              <motion.div
+                initial={{ x: "-100%" }}
+                animate={{ x: 0 }}
+                exit={{ x: "-100%" }}
+                transition={{ duration: 0.25, ease: "easeInOut" }}
+                className="fixed inset-y-0 left-0 z-50"
+              >
+                <ErrorBoundary label="Sessões">
+                  {sessionListNode}
+                </ErrorBoundary>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </>
+      )}
+
+      <ErrorBoundary label="Chat">
+        <ChatWindow
+          sessionId={activeSessionId}
+          sessionTitle={activeSession?.title}
+          sessionCompany={activeSession?.company}
+          companyId={companyId}
+          messages={messages}
+          isTyping={isTyping}
+          selectedAgent={selectedAgent}
+          rightPanelOpen={rightPanelOpen}
+          onAgentChange={handleAgentChange}
+          onSend={handleSend}
+          onRegenerate={handleRegenerate}
+          onToggleRightPanel={() => setRightPanelOpen(v => !v)}
+          onSourcesChanged={() => setSourcesVersion(v => v + 1)}
+          onToggleSessions={isMobile ? () => setMobileSessionsOpen(true) : undefined}
+          agents={agentList}
+        />
+      </ErrorBoundary>
 
       <RightContextPanel
         open={rightPanelOpen}

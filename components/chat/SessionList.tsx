@@ -9,6 +9,7 @@ import {
 import { cn } from "@/lib/utils"
 import { AgentTag } from "@/components/ui/StatusBadge"
 import type { UISession } from "@/hooks/useSessions"
+import { showSuccess, showError } from "@/lib/toast"
 
 type Tab = "ativas" | "favoritas" | "arquivadas"
 
@@ -47,9 +48,13 @@ export function SessionList({
     s.agentName.toLowerCase().includes(search.toLowerCase())
   )
 
-  const today     = filtered.filter(s => s.date === "today")
-  const yesterday = filtered.filter(s => s.date === "yesterday")
-  const older     = filtered.filter(s => s.date !== "today" && s.date !== "yesterday")
+  // Na tab "ativas", fixadas sobem para um grupo próprio no topo;
+  // os demais grupos por data excluem as fixadas para não duplicar.
+  const pinned    = tab === "ativas" ? filtered.filter(s => s.starred) : []
+  const byDate    = tab === "ativas" ? filtered.filter(s => !s.starred) : filtered
+  const today     = byDate.filter(s => s.date === "today")
+  const yesterday = byDate.filter(s => s.date === "yesterday")
+  const older     = byDate.filter(s => s.date !== "today" && s.date !== "yesterday")
 
   const tabCounts = {
     ativas:     sessions.filter(s => !s.archived).length,
@@ -59,12 +64,22 @@ export function SessionList({
 
   async function handleRenameSubmit(id: string, title: string) {
     const ok = await onRename(id, title)
-    if (ok) setEditingId(null)
+    if (ok) {
+      setEditingId(null)
+      showSuccess("Sessão renomeada")
+    } else {
+      showError("Falha ao renomear sessão")
+    }
   }
 
   async function handleDeleteConfirm(id: string) {
     const ok = await onDelete(id)
-    if (ok) setConfirmDeleteId(null)
+    if (ok) {
+      setConfirmDeleteId(null)
+      showSuccess("Sessão excluída")
+    } else {
+      showError("Falha ao excluir sessão")
+    }
   }
 
   return (
@@ -144,6 +159,16 @@ export function SessionList({
 
       {/* Sessions */}
       <div className="flex-1 overflow-y-auto px-2 pb-3">
+        {pinned.length > 0 && (
+          <SessionGroup
+            label="Fixadas" sessions={pinned}
+            activeId={activeId} hoveredId={hoveredId} editingId={editingId} confirmDeleteId={confirmDeleteId}
+            onSelect={onSelect} onHover={setHoveredId}
+            onStartEdit={setEditingId} onRenameSubmit={handleRenameSubmit} onRenameCancel={() => setEditingId(null)}
+            onDeleteStart={setConfirmDeleteId} onDeleteConfirm={handleDeleteConfirm} onDeleteCancel={() => setConfirmDeleteId(null)}
+            onTogglePinned={onTogglePinned} onArchive={onArchive} onUnarchive={onUnarchive}
+          />
+        )}
         {today.length > 0 && (
           <SessionGroup
             label="Hoje" sessions={today}
@@ -212,9 +237,9 @@ interface GroupProps {
   onDeleteStart:    (id: string) => void
   onDeleteConfirm:  (id: string) => void
   onDeleteCancel:   () => void
-  onTogglePinned:   (id: string) => void
-  onArchive:        (id: string) => void
-  onUnarchive:      (id: string) => void
+  onTogglePinned:   (id: string) => Promise<boolean>
+  onArchive:        (id: string) => Promise<boolean>
+  onUnarchive:      (id: string) => Promise<boolean>
 }
 
 function SessionGroup({ label, sessions, ...rest }: GroupProps) {
@@ -227,9 +252,11 @@ function SessionGroup({ label, sessions, ...rest }: GroupProps) {
         {label}
       </p>
       <div className="space-y-0.5">
-        {sessions.map((s) => (
-          <SessionItem key={s.id} session={s} {...rest} />
-        ))}
+        <AnimatePresence initial={false}>
+          {sessions.map((s) => (
+            <SessionItem key={s.id} session={s} {...rest} />
+          ))}
+        </AnimatePresence>
       </div>
     </div>
   )
@@ -269,23 +296,30 @@ function SessionItem({
 
   return (
     <motion.div
+      layout
+      exit={{ opacity: 0, height: 0, marginBottom: 0, transition: { duration: 0.18 } }}
       onHoverStart={() => !isEditing && !isConfirmDelete && onHover(s.id)}
       onHoverEnd={() => onHover(null)}
       onClick={() => !isEditing && !isConfirmDelete && onSelect(s.id)}
       className={cn(
-        "group flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-colors relative",
+        "group flex items-start gap-2.5 px-3 py-2.5 rounded-xl transition-colors relative overflow-hidden",
         isEditing || isConfirmDelete ? "cursor-default" : "cursor-pointer",
         active
           ? "bg-mota-600/10 border border-mota-600/25"
           : "hover:bg-[var(--bg-hover)] border border-transparent",
+        s.starred && !active && "border-l-2 border-l-[#facc15]/60",
       )}
     >
-      {/* Status dot */}
+      {/* Status dot / estrela quando fixada */}
       <div className="mt-1 shrink-0">
-        <span
-          className="block w-1.5 h-1.5 rounded-full"
-          style={{ background: "var(--border-color)" }}
-        />
+        {s.starred ? (
+          <Star size={9} fill="#facc15" style={{ color: "#facc15" }} />
+        ) : (
+          <span
+            className="block w-1.5 h-1.5 rounded-full"
+            style={{ background: "var(--border-color)" }}
+          />
+        )}
       </div>
 
       {/* Content */}
@@ -387,7 +421,11 @@ function SessionItem({
                   </button>
                   <button
                     title={s.starred ? "Desfavoritar" : "Favoritar"}
-                    onClick={e => { e.stopPropagation(); onTogglePinned(s.id) }}
+                    onClick={async e => {
+                      e.stopPropagation()
+                      const ok = await onTogglePinned(s.id)
+                      if (!ok) showError("Falha ao atualizar favorito")
+                    }}
                     className="w-5 h-5 flex items-center justify-center rounded hover:bg-[var(--bg-hover)] transition-colors"
                     style={{ color: s.starred ? "#facc15" : "var(--text-muted)" }}
                   >
@@ -396,7 +434,12 @@ function SessionItem({
                   {s.archived ? (
                     <button
                       title="Desarquivar"
-                      onClick={e => { e.stopPropagation(); onUnarchive(s.id) }}
+                      onClick={async e => {
+                        e.stopPropagation()
+                        const ok = await onUnarchive(s.id)
+                        if (ok) showSuccess("Sessão desarquivada")
+                        else    showError("Falha ao desarquivar")
+                      }}
                       className="w-5 h-5 flex items-center justify-center rounded hover:bg-[var(--bg-hover)] transition-colors"
                       style={{ color: "var(--text-muted)" }}
                     >
@@ -405,7 +448,15 @@ function SessionItem({
                   ) : (
                     <button
                       title="Arquivar"
-                      onClick={e => { e.stopPropagation(); onArchive(s.id) }}
+                      onClick={async e => {
+                        e.stopPropagation()
+                        const ok = await onArchive(s.id)
+                        if (ok) showSuccess("Sessão arquivada", {
+                          label:   "Desfazer",
+                          onClick: () => onUnarchive(s.id),
+                        })
+                        else showError("Falha ao arquivar")
+                      }}
                       className="w-5 h-5 flex items-center justify-center rounded hover:bg-[var(--bg-hover)] transition-colors"
                       style={{ color: "var(--text-muted)" }}
                     >
@@ -421,8 +472,6 @@ function SessionItem({
                     <Trash2 size={10} />
                   </button>
                 </motion.div>
-              ) : s.starred ? (
-                <Star size={10} fill="#facc15" style={{ color: "#facc15" }} />
               ) : null}
             </AnimatePresence>
           </>

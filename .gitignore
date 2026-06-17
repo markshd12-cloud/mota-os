@@ -27,11 +27,13 @@
 .DS_Store
 *.pem
 
-# google service account keys (NUNCA commitar — use GOOGLE_SERVICE_ACCOUNT_KEY no env)
+# google service account keys (NUNCA commitar — use GOOGLE_SERVICE_ACCOUNT_JSON no env)
 *-service-account*.json
 savvy-courage-*.json
 gcp-*.json
 *.serviceaccount.json
+# chaves de service account do projeto GCP "jarvis-*" (ex: jarvis-498903-xxxx.json)
+jarvis-*.json
 
 # debug
 npm-debug.log*

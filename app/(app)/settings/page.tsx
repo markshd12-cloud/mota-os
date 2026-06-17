@@ -1261,7 +1261,8 @@ function UsersTab() {
   const [error, setError] = useState<string>("");
   const [success, setSuccess] = useState("");
   const [resetingUserId, setResetingUserId] = useState<string | null>(null);
-  const [resetMsg, setResetMsg] = useState<{ id: string; text: string; ok: boolean } | null>(null);
+  const [resetMsg, setResetMsg] = useState<{ id: string; text: string; ok: boolean; link?: string | null } | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [linkingId, setLinkingId] = useState<string | null>(null);
@@ -1396,22 +1397,26 @@ function UsersTab() {
   async function handleResetPassword(userId: string) {
     setResetingUserId(userId);
     setResetMsg(null);
+    setCopiedLink(false);
     try {
       const res = await fetch(`/api/users/${userId}/reset-password`, {
         method: "POST",
         credentials: "same-origin",
       });
-      const json = await res.json() as { ok?: boolean; message?: string; error?: string };
+      const json = await res.json() as { ok?: boolean; message?: string; error?: string; link?: string | null };
       setResetMsg({
         id: userId,
-        text: json.message ?? json.error ?? (res.ok ? "E-mail enviado!" : "Erro ao enviar"),
+        text: json.message ?? json.error ?? (res.ok ? "Link gerado!" : "Erro ao gerar"),
         ok: res.ok,
+        link: json.link ?? null,
       });
+      // Só auto-fecha se NÃO houver link para copiar (admin precisa de tempo)
+      if (!json.link) setTimeout(() => setResetMsg(null), 5000);
     } catch {
       setResetMsg({ id: userId, text: "Erro de conexão", ok: false });
+      setTimeout(() => setResetMsg(null), 5000);
     } finally {
       setResetingUserId(null);
-      setTimeout(() => setResetMsg(null), 5000);
     }
   }
 
@@ -1607,6 +1612,33 @@ function UsersTab() {
                       >
                         {thisActionMsg.text}
                       </p>
+                    )}
+                    {thisMsg?.link && (
+                      <div className="flex items-center gap-1.5 mt-1.5">
+                        <input
+                          readOnly
+                          value={thisMsg.link}
+                          onClick={(e) => e.currentTarget.select()}
+                          className="flex-1 text-[10px] px-2 py-1 rounded border outline-none truncate"
+                          style={{
+                            background:  "var(--bg-hover)",
+                            borderColor: "var(--border-color)",
+                            color:       "var(--text-secondary)",
+                          }}
+                        />
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(thisMsg.link!).then(() => {
+                              setCopiedLink(true);
+                              setTimeout(() => setCopiedLink(false), 2000);
+                            }).catch(() => {});
+                          }}
+                          className="shrink-0 text-[10px] px-2 py-1 rounded font-medium text-white bg-mota-600 hover:bg-mota-700 transition-colors"
+                          title="Copiar link de acesso"
+                        >
+                          {copiedLink ? "Copiado!" : "Copiar link"}
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>

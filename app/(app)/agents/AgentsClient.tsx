@@ -5,6 +5,7 @@ import { motion } from "framer-motion"
 import { Bot, Search, X, Plus, Archive } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { PageHeader } from "@/components/ui/PageHeader"
+import { EmptyState } from "@/components/ui/EmptyState"
 import { type AgentWithConfig } from "@/hooks/useAgents"
 import { cn } from "@/lib/utils"
 
@@ -144,10 +145,24 @@ export function AgentsClient({ agents, loading, error, onReload }: AgentsClientP
               ))}
             </div>
           ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 gap-3">
-              <Bot size={32} style={{ color: "var(--text-muted)" }} />
-              <p className="text-sm" style={{ color: "var(--text-muted)" }}>Nenhum agente encontrado</p>
-            </div>
+            search ? (
+              <EmptyState
+                icon={Search}
+                title="Nenhum agente encontrado"
+                description={`Nenhum resultado para "${search}". Tente outro termo de busca.`}
+              />
+            ) : (
+              <EmptyState
+                icon={Bot}
+                title="Nenhum agente ainda"
+                description="Crie agentes de IA especializados para responder seu time com contexto e instruções próprias."
+                action={{
+                  label:   "Criar primeiro agente",
+                  icon:    Plus,
+                  onClick: () => router.push("/agents/new"),
+                }}
+              />
+            )
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {filtered.map((a, i) => (
