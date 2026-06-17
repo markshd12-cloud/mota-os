@@ -3,8 +3,7 @@ import { createClient }      from '@/lib/supabase-server'
 import { createAdminClient } from '@/lib/supabase-admin'
 import { getAllowedCompanyIds, isGlobalAdmin } from '@/lib/company-scope'
 import { logActivity } from '@/lib/activity-logger'
-import { evaluateWatcher, type WatcherType } from '@/lib/watchers/evaluate-watcher'
-import { calcNextRunAt, type WatcherFrequency } from '@/lib/watchers/schedule'
+import { runWatcher } from '@/lib/watchers/run-watcher'
 
 export const dynamic = "force-dynamic"
 
@@ -43,84 +42,26 @@ export async function POST(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Vigia está desativado ou pausado' }, { status: 400 })
   }
 
-  // Criar log com status 'running'
-  const { data: logRow, error: logErr } = await admin
-    .from('watcher_logs')
-    .insert({
-      watcher_id:    id,
-      company_id:    watcher.company_id,
-      status:        'running',
-      message:       '',
-      result:        {},
-      result_data:   {},
-      matched_count: 0,
-      triggered:     false,
-    })
-    .select('id')
-    .single()
-
-  if (logErr || !logRow) {
-    return NextResponse.json({ error: 'Erro ao criar log de execução' }, { status: 500 })
-  }
-
   void logActivity({
     userId:    user.id,
     eventType: 'watcher',
     action:    'watcher_run_started',
     detail:    `Execução manual do vigia "${watcher.name}"`,
     companyId: watcher.company_id,
-    metadata:  { watcher_id: id, log_id: logRow.id },
+    metadata:  { watcher_id: id },
   })
 
-  // Executar avaliação
-  const condition = (watcher.condition_config ?? watcher.condition ?? {}) as Record<string, unknown>
-  const check = await evaluateWatcher(
-    watcher.watcher_type as WatcherType,
-    condition,
-    watcher.company_id,
-    admin,
-  )
+  let result
+  try {
+    result = await runWatcher(admin, watcher)
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'Erro ao executar vigia' },
+      { status: 500 },
+    )
+  }
 
-  const finishedAt = new Date().toISOString()
-
-  // Mapear status para schema legado (watcher_logs aceita: running/ok/alert/error/success/warning/failed)
-  // 'warning' é novo — mantemos; 'ok' e 'alert' já existiam
-  const logStatus: 'ok' | 'alert' | 'error' | 'warning' =
-    check.status === 'ok'    ? 'ok'
-    : check.status === 'alert'   ? 'alert'
-    : check.status === 'warning' ? 'warning'
-    : 'error'
-
-  const nextRunAt = calcNextRunAt({
-    frequency:    watcher.frequency as WatcherFrequency,
-    scheduleTime: watcher.schedule_time,
-    timezone:     watcher.timezone,
-    daysOfWeek:   watcher.days_of_week,
-  })
-
-  await Promise.all([
-    admin.from('watcher_logs').update({
-      status:        logStatus,
-      message:       check.message,
-      result:        check.result_data,
-      result_data:   check.result_data,
-      triggered:     check.triggered,
-      matched_count: check.matched_count,
-      error_message: check.error_message,
-      finished_at:   finishedAt,
-    }).eq('id', logRow.id),
-
-    admin.from('watchers').update({
-      last_check_at:  finishedAt,
-      next_check_at:  nextRunAt,
-      last_result:    {
-        status:    check.status,
-        message:   check.message,
-        triggered: check.triggered,
-      },
-      triggers_count: (watcher.triggers_count ?? 0) + (check.triggered ? 1 : 0),
-    }).eq('id', id),
-  ])
+  const { logId, check, notify } = result
 
   void logActivity({
     userId:    user.id,
@@ -128,17 +69,21 @@ export async function POST(_req: NextRequest, { params }: Params) {
     action:    check.status === 'error' ? 'watcher_run_failed' : 'watcher_run_finished',
     detail:    check.message,
     companyId: watcher.company_id,
-    metadata:  { watcher_id: id, log_id: logRow.id, status: check.status, matched_count: check.matched_count },
+    metadata:  {
+      watcher_id: id, log_id: logId, status: check.status,
+      matched_count: check.matched_count, notified: notify?.sent ?? false,
+    },
   })
 
   return NextResponse.json({
     ok:            true,
-    log_id:        logRow.id,
+    log_id:        logId,
     status:        check.status,
     message:       check.message,
     triggered:     check.triggered,
     matched_count: check.matched_count,
     result:        check.result_data,
     error_message: check.error_message,
+    notification:  notify,
   })
 }

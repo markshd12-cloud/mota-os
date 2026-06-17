@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useTransition, useCallback } from "react"
+import { useState, useEffect, useTransition, useCallback, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import {
   Zap, Play, Pause, Plus, Clock, CalendarClock, Eye,
@@ -408,6 +408,9 @@ function WatcherModal({
   const [scheduleTime, setSchedTime]  = useState(initial?.schedule_time         ?? "")
   const [timezone,     setTimezone]   = useState(initial?.timezone              ?? "America/Recife")
   const [daysOfWeek,   setDaysOfWeek] = useState<string[]>(initial?.days_of_week ?? [])
+  const [notifyChannel, setNotifyChannel] = useState<string>(
+    (initial?.notification_config?.channel as string) ?? initial?.notification_channel ?? "dashboard"
+  )
   const [saving,       setSaving]     = useState(false)
 
   function setCondField(key: string, value: unknown) {
@@ -432,6 +435,8 @@ function WatcherModal({
       schedule_time: scheduleTime.trim() || null,
       timezone,
       days_of_week: daysOfWeek.length > 0 ? daysOfWeek : null,
+      notification_channel: notifyChannel,
+      notification_config: { channel: notifyChannel },
     })
     setSaving(false)
   }
@@ -506,6 +511,19 @@ function WatcherModal({
             )}
           </div>
         )}
+
+        <div>
+          <label className="text-xs font-medium mb-1.5 block" style={{ color: "var(--text-secondary)" }}>Notificar via</label>
+          <select value={notifyChannel} onChange={(e) => setNotifyChannel(e.target.value)} className={inputCls} style={inputStyle}>
+            <option value="dashboard">Painel (somente no app)</option>
+            <option value="rocketchat">Rocket.Chat (canal de alertas)</option>
+          </select>
+          {notifyChannel === "rocketchat" && (
+            <p className="text-[11px] mt-1" style={{ color: "var(--text-muted)" }}>
+              Usa o destino padrão tipo &quot;Vigias&quot; em Configurações &gt; APIs &gt; Destinos Rocket.Chat.
+            </p>
+          )}
+        </div>
 
         <div>
           <label className="text-xs font-medium mb-1.5 block" style={{ color: "var(--text-secondary)" }}>Tipo de verificação *</label>
@@ -823,9 +841,10 @@ function AutomationCard({
 // ─── Watcher card ─────────────────────────────────────────────────────────────
 
 function WatcherCard({
-  watcher, onEdit, onDelete, onToggle, onRun, onViewLogs,
+  watcher, company, onEdit, onDelete, onToggle, onRun, onViewLogs,
 }: {
   watcher:    WatcherRow
+  company?:   { name: string; color: string }
   onEdit:     (w: WatcherRow) => void
   onDelete:   (id: string) => void
   onToggle:   (id: string, s: "active" | "paused") => void
@@ -865,6 +884,11 @@ function WatcherCard({
           </div>
 
           <div className="flex items-center gap-3 mt-3 flex-wrap">
+            <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium border"
+              style={{ borderColor: `${company?.color ?? "#64748b"}40`, background: `${company?.color ?? "#64748b"}12`, color: company?.color ?? "var(--text-muted)" }}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: company?.color ?? "#64748b" }} />
+              {company?.name ?? watcher.company_id}
+            </span>
             <span className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ background: `${info.color}15`, color: info.color }}>{info.label}</span>
             <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>{WATCHER_FREQ_LABELS[watcher.frequency] ?? watcher.frequency}</span>
             <div className="flex items-center gap-1.5">
@@ -945,6 +969,10 @@ export function AutomationsClient({
   useEffect(() => { loadWatchers() }, [loadWatchers])
 
   const defaultCompanyId = currentCompany?.slug ?? allowedCompanies[0]?.slug ?? "grupo"
+  const companyBySlug = useMemo(
+    () => Object.fromEntries(allowedCompanies.map((c) => [c.slug, c])),
+    [allowedCompanies],
+  )
 
   // Stats
   const activeSkills   = skills.filter((s) => s.status === "active").length
@@ -998,12 +1026,14 @@ export function AutomationsClient({
   async function saveWatcher(data: Partial<WatcherRow>) {
     if (watchModalMode === "create") {
       const res = await fetch("/api/watchers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) })
-      const row = await res.json() as WatcherRow
-      if (res.ok) setWatchers((p) => [row, ...p])
+      const row = await res.json() as WatcherRow & { error?: string }
+      if (!res.ok) { setRunError(row.error ?? "Erro ao criar vigia"); return }
+      setWatchers((p) => [row, ...p])
     } else if (watchEditTarget) {
       const res = await fetch(`/api/watchers/${watchEditTarget.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) })
-      const row = await res.json() as WatcherRow
-      if (res.ok) setWatchers((p) => p.map((w) => w.id === watchEditTarget.id ? row : w))
+      const row = await res.json() as WatcherRow & { error?: string }
+      if (!res.ok) { setRunError(row.error ?? "Erro ao salvar vigia"); return }
+      setWatchers((p) => p.map((w) => w.id === watchEditTarget.id ? row : w))
     }
     setWatchModalMode(null); setWatchEditTarget(null)
   }
@@ -1173,6 +1203,7 @@ export function AutomationsClient({
                   <div className="space-y-3">
                     {watchers.map((w) => (
                       <WatcherCard key={w.id} watcher={w}
+                        company={companyBySlug[w.company_id]}
                         onEdit={(row) => { setWatchEditTarget(row); setWatchModalMode("edit") }}
                         onDelete={deleteWatcher}
                         onToggle={toggleWatcher}

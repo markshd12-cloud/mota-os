@@ -314,6 +314,14 @@ export function ChatWindow({
     }
   }
 
+  // O placeholder vazio do assistente já renderiza "🔍 Pesquisando nas fontes...".
+  // Quando ele está visível, não mostramos também o indicador de digitação ("...")
+  // para evitar dois balões duplicados antes da resposta.
+  const lastMessage = messages[messages.length - 1];
+  const searchingPlaceholderVisible =
+    lastMessage?.role === "assistant" &&
+    lastMessage.content.some((b) => b.kind === "text" && b.content === "");
+
   return (
     <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
       {/* Chat header */}
@@ -471,7 +479,7 @@ export function ChatWindow({
             ))}
 
             <AnimatePresence>
-              {isTyping && (
+              {isTyping && !searchingPlaceholderVisible && (
                 <TypingIndicator
                   agentName={selectedAgent?.name ?? "Jarvis"}
                   agentColor={selectedAgent?.color ?? "#16a34a"}

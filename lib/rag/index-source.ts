@@ -71,7 +71,11 @@ export async function indexSource(opts: IndexSourceOptions): Promise<IndexSource
     await admin.from("knowledge_chunks").delete().eq(col, opts.sourceId)
 
     // ── Gerar embeddings (em lotes de 100) ───────────────────────────────
-    const embeddings = await embedBatch(textChunks.map(c => c.content))
+    // Prefixamos o título da fonte em cada chunk antes de embeddar para que
+    // buscas pelo nome da fonte (ex.: "mente do cliente") casem com forte
+    // similaridade, mesmo quando o corpo do texto não repete o termo.
+    const titlePrefix = opts.title ? `${opts.title}\n\n` : ""
+    const embeddings = await embedBatch(textChunks.map(c => titlePrefix + c.content))
 
     // ── Inserir novos chunks ─────────────────────────────────────────────
     const rows = textChunks.map((chunk, i) => ({
