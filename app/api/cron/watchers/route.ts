@@ -9,7 +9,12 @@ export const maxDuration = 300
 
 function authorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET
-  if (!secret) return true // sem segredo configurado, não bloqueia (recomenda-se configurar)
+  if (!secret) {
+    // Em produção, falha fechado: sem segredo configurado o cron fica inacessível
+    // (evita disparo público não autenticado). Em dev, permite para facilitar testes.
+    const isProd = process.env.VERCEL_ENV === 'production' || process.env.NODE_ENV === 'production'
+    return !isProd
+  }
   const header = req.headers.get('authorization')
   if (header === `Bearer ${secret}`) return true
   // Fallback: ?secret= para disparo manual/testes
@@ -23,9 +28,6 @@ async function handle(req: NextRequest) {
 
   const admin = createAdminClient()
   const nowIso = new Date().toISOString()
-
-  // Vigias vencidos: ativos, habilitados, não-deletados, agendados (next_check_at <= now).
-  // Vigias 'manual' têm next_check_at = null e portanto ficam de fora automaticamente.
   const { data: due, error } = await admin
     .from('watchers')
     .select('*')

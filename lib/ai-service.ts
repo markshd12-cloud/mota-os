@@ -89,6 +89,107 @@ export async function completeText(params: {
     .join("")
 }
 
+// ─── Tratamento de erro amigável ──────────────────────────────────────────────
+
+/** Formata uma duração em segundos como "2h 5min", "45min" ou "30s". */
+function formatDuration(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (h > 0) return m > 0 ? `${h}h ${m}min` : `${h}h`
+  if (m > 0) return sec > 0 && m < 5 ? `${m}min ${sec}s` : `${m}min`
+  return `${sec}s`
+}
+
+/**
+ * Extrai os segundos até o reset a partir dos headers de rate limit da Anthropic.
+ * `retry-after` (segundos, ou data HTTP) tem precedência; senão usa o reset mais
+ * distante dentre os headers `anthropic-ratelimit-*-reset` (timestamp unix ou RFC 3339).
+ * Retorna null se nenhum header informativo estiver presente.
+ */
+function retryAfterSeconds(headers: Headers | undefined): number | null {
+  if (!headers) return null
+
+  const ra = headers.get("retry-after")
+  if (ra) {
+    const n = Number(ra)
+    if (Number.isFinite(n)) return n
+    const when = Date.parse(ra) // pode vir como data HTTP
+    if (!Number.isNaN(when)) return (when - Date.now()) / 1000
+  }
+
+  const resetKeys = [
+    "anthropic-ratelimit-unified-reset",
+    "anthropic-ratelimit-tokens-reset",
+    "anthropic-ratelimit-input-tokens-reset",
+    "anthropic-ratelimit-output-tokens-reset",
+    "anthropic-ratelimit-requests-reset",
+  ]
+  let max: number | null = null
+  for (const k of resetKeys) {
+    const v = headers.get(k)
+    if (!v) continue
+    const asNum = Number(v)
+    const ms = Number.isFinite(asNum) ? asNum * 1000 : Date.parse(v)
+    if (Number.isNaN(ms)) continue
+    const secs = (ms - Date.now()) / 1000
+    if (max === null || secs > max) max = secs
+  }
+  return max
+}
+
+/**
+ * Converte um erro de provedor de IA em uma mensagem amigável em PT (sem emoji —
+ * a UI prefixa "⚠️"). Para limites de uso (429) e cota esgotada, inclui o tempo
+ * estimado de retorno quando os headers da Anthropic o informam.
+ */
+function friendlyAIError(provider: AIProvider, err: unknown): string {
+  if (err instanceof Anthropic.APIError) {
+    const retry  = retryAfterSeconds(err.headers)
+    const body   = err.error as { error?: { message?: string } } | undefined
+    const apiMsg = body?.error?.message ?? ""
+
+    // Diagnóstico: registra status e headers de rate limit para auditoria nos logs.
+    console.error(
+      `[ai-service] Anthropic ${err.status ?? "?"} type=${err.type ?? "?"} ` +
+      `retry-after=${err.headers?.get("retry-after") ?? "—"} ` +
+      `reset=${err.headers?.get("anthropic-ratelimit-unified-reset") ?? "—"} :: ${apiMsg.slice(0, 160)}`,
+    )
+
+    const tempo = retry && retry > 0 ? ` A sessão deve voltar em aproximadamente ${formatDuration(retry)}.` : ""
+
+    // Limite de uso / rate limit → tem tempo de retorno nos headers
+    if (err.status === 429 || err.type === "rate_limit_error") {
+      return tempo
+        ? `Limite de uso da IA atingido.${tempo}`
+        : "Limite de uso da IA atingido. Tente novamente em alguns minutos."
+    }
+
+    // Cota/créditos esgotados (billing). Quando há header de reset, mostra o tempo;
+    // senão, evita número falso e indica que costuma voltar em algumas horas.
+    if (/credit balance/i.test(apiMsg) || err.type === "billing_error") {
+      return tempo
+        ? `Cota de uso da IA esgotada.${tempo}`
+        : "A conta da IA atingiu o limite de uso. Costuma voltar em algumas horas — tente novamente mais tarde."
+    }
+
+    if (err.status === 401 || err.status === 403) {
+      return "Falha de autenticação com a IA. Avise o administrador."
+    }
+    if (err.status === 529) {
+      return "O serviço de IA está sobrecarregado. Tente novamente em instantes."
+    }
+    if (err.status && err.status >= 500) {
+      return "O serviço de IA está instável no momento. Tente novamente."
+    }
+    return apiMsg ? `Erro da IA: ${apiMsg}` : `Erro da IA (${err.status ?? "?"}).`
+  }
+
+  const msg = err instanceof Error ? err.message : String(err)
+  return `[${provider}] ${msg}`
+}
+
 // ─── Entry point público ──────────────────────────────────────────────────────
 
 export async function* streamChat(params: AIStreamParams): AsyncGenerator<AIChunk> {
@@ -105,8 +206,7 @@ export async function* streamChat(params: AIStreamParams): AsyncGenerator<AIChun
       yield* streamAnthropic(params)
     }
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    yield { done: true, text: "", error: `[${provider}] ${msg}` }
+    yield { done: true, text: "", error: friendlyAIError(provider, err) }
   }
 }
 

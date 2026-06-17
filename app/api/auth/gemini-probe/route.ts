@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getValidGeminiToken }    from "@/lib/gemini-auth"
 import { getServiceAccountToken } from "@/lib/gemini-service-account"
+import { createClient }           from "@/lib/supabase-server"
+import { isGlobalAdmin }          from "@/lib/company-scope"
+
+export const dynamic = "force-dynamic"
 
 async function readJsonOrText(res: Response) {
   const text = await res.text()
@@ -8,6 +12,15 @@ async function readJsonOrText(res: Response) {
 }
 
 export async function GET(req: NextRequest) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ error: "Não autenticado." }, { status: 401 })
+  }
+  if (!(await isGlobalAdmin(user.id))) {
+    return NextResponse.json({ error: "Apenas admin." }, { status: 403 })
+  }
+
   const apiKey       = process.env.GEMINI_API_KEY ?? null
   const quotaProject =
     process.env.GOOGLE_CLOUD_PROJECT

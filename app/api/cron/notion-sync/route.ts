@@ -15,7 +15,12 @@ export const maxDuration = 300
 function authorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET
   // A Vercel envia automaticamente "Authorization: Bearer <CRON_SECRET>"
-  if (!secret) return true // sem segredo configurado, não bloqueia (mas recomenda-se configurar)
+  if (!secret) {
+    // Em produção, falha fechado: sem segredo configurado o cron fica inacessível
+    // (evita disparo público não autenticado). Em dev, permite para facilitar testes.
+    const isProd = process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production"
+    return !isProd
+  }
   const header = req.headers.get("authorization")
   if (header === `Bearer ${secret}`) return true
   // Fallback: permite ?secret= para disparo manual/testes

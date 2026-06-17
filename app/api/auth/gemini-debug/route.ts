@@ -2,6 +2,10 @@ import { cookies } from "next/headers"
 import { NextRequest, NextResponse } from "next/server"
 import { getValidGeminiToken } from "@/lib/gemini-auth"
 import { GEMINI_COOKIE_NAMES, getGeminiOauthConfig, getGeminiRedirectUri } from "@/lib/gemini-oauth"
+import { createClient } from "@/lib/supabase-server"
+import { isGlobalAdmin } from "@/lib/company-scope"
+
+export const dynamic = "force-dynamic"
 
 type TokenInfoResponse = {
   scope?: string
@@ -21,6 +25,15 @@ function resolveQuotaProject() {
 }
 
 export async function GET(req: NextRequest) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ error: "Não autenticado." }, { status: 401 })
+  }
+  if (!(await isGlobalAdmin(user.id))) {
+    return NextResponse.json({ error: "Apenas admin." }, { status: 403 })
+  }
+
   const forceRefresh = req.nextUrl.searchParams.get("refresh") === "1"
   const token = await getValidGeminiToken(forceRefresh)
   const cookieStore = await cookies()
