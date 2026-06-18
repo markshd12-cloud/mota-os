@@ -223,6 +223,7 @@ export async function GET(req: NextRequest) {
       admin.from("agents")
         .select("id, name, short_name, color, is_active")
         .eq("is_active", true)
+        .eq("kind", "agent")
     ),
 
     // Sessions count in period

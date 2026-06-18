@@ -17,7 +17,7 @@ function authorized(req: NextRequest): boolean {
   }
   const header = req.headers.get('authorization')
   if (header === `Bearer ${secret}`) return true
-  // Fallback: ?secret= para disparo manual/testes
+
   return new URL(req.url).searchParams.get('secret') === secret
 }
 

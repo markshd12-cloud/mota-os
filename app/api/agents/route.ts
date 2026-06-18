@@ -38,6 +38,7 @@ export async function GET(req: NextRequest) {
   let query = admin
     .from('agents')
     .select('*')
+    .eq('kind', 'agent')           // só capacidades conversáveis (exclui workflow/simple)
     .is('deleted_at', null)
     .order('name')
 

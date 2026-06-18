@@ -128,6 +128,7 @@ export async function POST(req: NextRequest) {
       .from("agents")
       .select("id, companies, status")
       .eq("id", body.agent_id)
+      .eq("kind", "agent")
       .single()
 
     if (!agentRow || agentRow.status !== "active") {

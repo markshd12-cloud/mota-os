@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
     admin
       .from("agents")
       .select("id, name, color, status")
+      .eq("kind", "agent")
       .order("name"),
     admin
       .from("agent_model_configs")

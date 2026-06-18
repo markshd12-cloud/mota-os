@@ -36,6 +36,7 @@ export async function GET() {
         const { count } = await admin
           .from("agents")
           .select("id", { count: "exact", head: true })
+          .eq("kind", "agent")
           .eq("status", "active")
           .is("deleted_at", null)
         return count ?? 0
@@ -51,6 +52,7 @@ export async function GET() {
         .from("agents")
         .select("id", { count: "exact", head: true })
         .in("id", ids)
+        .eq("kind", "agent")
         .eq("status", "active")
         .is("deleted_at", null)
       return count ?? 0
