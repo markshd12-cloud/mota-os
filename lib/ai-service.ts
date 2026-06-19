@@ -144,7 +144,19 @@ function retryAfterSeconds(headers: Headers | undefined): number | null {
  * a UI prefixa "⚠️"). Para limites de uso (429) e cota esgotada, inclui o tempo
  * estimado de retorno quando os headers da Anthropic o informam.
  */
+/** Nome amigável do provedor para mensagens ao usuário. */
+function providerLabel(provider: AIProvider): string {
+  switch (provider) {
+    case "anthropic": return "Claude (Anthropic)"
+    case "gemini":    return "Gemini (Google)"
+    case "openai":    return "OpenAI"
+    case "deepseek":  return "DeepSeek"
+    default:          return provider
+  }
+}
+
 function friendlyAIError(provider: AIProvider, err: unknown): string {
+  const who = providerLabel(provider)
   if (err instanceof Anthropic.APIError) {
     const retry  = retryAfterSeconds(err.headers)
     const body   = err.error as { error?: { message?: string } } | undefined
@@ -162,32 +174,32 @@ function friendlyAIError(provider: AIProvider, err: unknown): string {
     // Limite de uso / rate limit → tem tempo de retorno nos headers
     if (err.status === 429 || err.type === "rate_limit_error") {
       return tempo
-        ? `Limite de uso da IA atingido.${tempo}`
-        : "Limite de uso da IA atingido. Tente novamente em alguns minutos."
+        ? `Limite de uso do ${who} atingido.${tempo}`
+        : `Limite de uso do ${who} atingido. Tente novamente em alguns minutos.`
     }
 
     // Cota/créditos esgotados (billing). Quando há header de reset, mostra o tempo;
-    // senão, evita número falso e indica que costuma voltar em algumas horas.
+    // senão, evita número falso e indica a ação (verificar saldo ou trocar de modelo).
     if (/credit balance/i.test(apiMsg) || err.type === "billing_error") {
       return tempo
-        ? `Cota de uso da IA esgotada.${tempo}`
-        : "A conta da IA atingiu o limite de uso. Costuma voltar em algumas horas — tente novamente mais tarde."
+        ? `Cota/créditos do ${who} esgotados.${tempo}`
+        : `A conta do ${who} está sem créditos/cota disponível no momento. Verifique o saldo (Plans & Billing) ou troque de modelo no seletor do chat.`
     }
 
     if (err.status === 401 || err.status === 403) {
-      return "Falha de autenticação com a IA. Avise o administrador."
+      return `Falha de autenticação com o ${who}. Avise o administrador.`
     }
     if (err.status === 529) {
-      return "O serviço de IA está sobrecarregado. Tente novamente em instantes."
+      return `O ${who} está sobrecarregado. Tente novamente em instantes.`
     }
     if (err.status && err.status >= 500) {
-      return "O serviço de IA está instável no momento. Tente novamente."
+      return `O ${who} está instável no momento. Tente novamente.`
     }
-    return apiMsg ? `Erro da IA: ${apiMsg}` : `Erro da IA (${err.status ?? "?"}).`
+    return apiMsg ? `Erro do ${who}: ${apiMsg}` : `Erro do ${who} (${err.status ?? "?"}).`
   }
 
   const msg = err instanceof Error ? err.message : String(err)
-  return `[${provider}] ${msg}`
+  return `Erro do ${who}: ${msg}`
 }
 
 // ─── Entry point público ──────────────────────────────────────────────────────
