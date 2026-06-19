@@ -31,7 +31,14 @@ export async function completeGemini(
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents:          [{ role: "user", parts: [{ text: user }] }],
-      generationConfig:  { temperature: opts?.temperature ?? 0, maxOutputTokens: opts?.maxTokens ?? 400 },
+      generationConfig:  {
+        temperature:     opts?.temperature ?? 0,
+        maxOutputTokens: opts?.maxTokens ?? 1024,
+        // gemini-2.5-flash é "thinking": sem isto, o pensamento consome o limite de
+        // tokens e o JSON sai truncado em respostas elaboradas. Para extração
+        // determinística, desligamos o pensamento.
+        thinkingConfig:  { thinkingBudget: 0 },
+      },
     }),
   })
   if (!res.ok) {

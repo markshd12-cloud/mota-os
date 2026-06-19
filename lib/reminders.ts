@@ -70,7 +70,12 @@ export function buildExtractionUser(message: string): string {
 /** Faz parse + validação do JSON devolvido pela IA. Retorna null se inválido. */
 export function parseReminderSpec(raw: string): ReminderSpec | null {
   try {
-    const jsonStr = raw.trim().replace(/^```json\s*|\s*```$/g, "").trim()
+    let jsonStr = raw.trim().replace(/^```json\s*|\s*```$/g, "").trim()
+    // Robustez: se vier prosa em volta, extrai o primeiro objeto {...}.
+    if (!jsonStr.startsWith("{")) {
+      const m = jsonStr.match(/\{[\s\S]*\}/)
+      if (m) jsonStr = m[0]
+    }
     const o = JSON.parse(jsonStr) as Partial<ReminderSpec>
     const content = typeof o.content === "string" ? o.content.trim() : ""
     const time = typeof o.time_of_day === "string" ? o.time_of_day.trim() : ""
