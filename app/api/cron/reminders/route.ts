@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase-admin"
 import { sendRocketChatMessage } from "@/lib/watchers/notify"
 import { computeNextRunAt, type Recurrence } from "@/lib/reminders"
+import { sendPushToUser } from "@/lib/push"
 import { logActivity } from "@/lib/activity-logger"
 
 export const dynamic = "force-dynamic"
@@ -46,19 +47,22 @@ async function handle(req: NextRequest) {
     return NextResponse.json({ ok: true, fired: 0, ran_at: nowIso })
   }
 
-  let fired = 0, notified = 0, rocketSent = 0
+  let fired = 0, notified = 0, rocketSent = 0, pushed = 0
   const now = new Date()
 
   for (const r of due as ReminderRow[]) {
     const channels = Array.isArray(r.channels) ? r.channels : ["inapp", "rocketchat"]
     const text = `⏰ Lembrete: ${r.content}`
 
-    // ── Entrega in-app (notificação) ──
+    // ── Entrega in-app (notificação no sininho + Web Push do navegador) ──
     if (channels.includes("inapp")) {
       const { error: nErr } = await admin.from("notifications").insert({
         user_id: r.user_id, title: "Lembrete", body: r.content, kind: "reminder",
       })
       if (!nErr) notified++
+      pushed += await sendPushToUser(admin, r.user_id, {
+        title: "⏰ Lembrete", body: r.content, url: "/notifications", tag: `reminder-${r.id}`,
+      })
     }
 
     // ── Entrega Rocket.Chat ──
@@ -89,7 +93,7 @@ async function handle(req: NextRequest) {
     })
   }
 
-  return NextResponse.json({ ok: true, fired, notified, rocket_sent: rocketSent, ran_at: nowIso })
+  return NextResponse.json({ ok: true, fired, notified, pushed, rocket_sent: rocketSent, ran_at: nowIso })
 }
 
 export async function GET(req: NextRequest)  { return handle(req) }

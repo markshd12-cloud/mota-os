@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Bell, Clock } from "lucide-react"
+import { Bell, Clock, BellRing } from "lucide-react"
+import { subscribeToPush, pushPermission, type PushState } from "@/lib/push-client"
 
 type Notif = {
   id: string; title: string; body: string; kind: string
@@ -11,6 +12,15 @@ type Notif = {
 export default function NotificationsPage() {
   const [items, setItems]     = useState<Notif[]>([])
   const [loading, setLoading] = useState(true)
+  const [push, setPush]       = useState<PushState>("default")
+
+  useEffect(() => { setPush(pushPermission()) }, [])
+
+  async function enablePush() {
+    const r = await subscribeToPush()
+    setPush(pushPermission())
+    if (!r.ok && r.error) alert(r.error)
+  }
 
   useEffect(() => {
     fetch("/api/notifications")
@@ -33,6 +43,22 @@ export default function NotificationsPage() {
       >
         <Bell size={18} style={{ color: "var(--text-primary)" }} />
         <h1 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>Avisos</h1>
+        {push !== "unsupported" && (
+          <button
+            onClick={enablePush}
+            disabled={push === "granted"}
+            className="ml-auto flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors disabled:cursor-default"
+            style={push === "granted"
+              ? { background: "var(--bg-active)", color: "var(--mota-600, #16a34a)" }
+              : { background: "var(--bg-card)", border: "1px solid var(--border-color)", color: "var(--text-secondary)" }}
+            title="Recebe os lembretes como notificação do sistema, mesmo com a aba fechada"
+          >
+            <BellRing size={13} />
+            {push === "granted" ? "Alarmes do navegador ativos"
+              : push === "denied" ? "Bloqueado no navegador"
+              : "Ativar alarme no navegador"}
+          </button>
+        )}
       </header>
 
       <div className="flex-1 overflow-y-auto p-6">

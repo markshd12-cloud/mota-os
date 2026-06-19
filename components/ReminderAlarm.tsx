@@ -9,6 +9,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react"
 import { BellRing } from "lucide-react"
+import { ensurePushSubscribed } from "@/lib/push-client"
 
 type Notif = {
   id: string; title: string; body: string; kind: string
@@ -27,6 +28,9 @@ export function ReminderAlarm() {
   const beatRef     = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => { currentRef.current = current }, [current])
+
+  // Mantém a inscrição de Web Push viva (só age se a permissão já foi concedida)
+  useEffect(() => { void ensurePushSubscribed() }, [])
 
   // Desbloqueia o áudio no primeiro gesto (política de autoplay dos navegadores)
   useEffect(() => {
