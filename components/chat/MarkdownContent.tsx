@@ -64,6 +64,17 @@ function MarkdownContentInner({ content }: { content: string }) {
             </blockquote>
           ),
           hr: () => <hr className="my-3" style={{ borderColor: "var(--border-color)" }} />,
+          // Imagens (ex: imagens geradas pela IA) — limita largura e arredonda
+          img: ({ src, alt }) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={typeof src === "string" ? src : ""}
+              alt={alt ?? ""}
+              loading="lazy"
+              className="my-2 max-w-full h-auto rounded-xl border"
+              style={{ borderColor: "var(--border-color)", maxHeight: "32rem" }}
+            />
+          ),
           // Tabelas (GFM)
           table: ({ children }) => (
             <div className="my-2 overflow-x-auto rounded-xl border" style={{ borderColor: "var(--border-color)" }}>

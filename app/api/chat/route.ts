@@ -8,6 +8,9 @@ import { rateLimit, RATE_LIMITS, rateLimitSseResponse, isBodyTooLarge, BODY_LIMI
 import { getAllowedCompanyIds, isGlobalAdmin, getCurrentCompany } from "@/lib/company-scope"
 import { parseSlashCommand } from "@/lib/slash-agents"
 import { resolveAIMode, isAIMode, modelLabel } from "@/lib/ai/model-registry"
+import { detectImagePrompt } from "@/lib/ai/detect-image-request"
+import { generateImage, imageErrorMessage, GEMINI_IMAGE_MODEL } from "@/lib/ai/generate-image"
+import { saveGeneratedImage } from "@/lib/storage/generated-images"
 
 export const dynamic = "force-dynamic"
 
@@ -15,6 +18,96 @@ export const dynamic = "force-dynamic"
 
 function sse(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`)
+}
+
+// ─── Geração de imagem (Gemini) ─────────────────────────────────────────────────
+// Responde no MESMO protocolo SSE do chat (delta + done), persiste as mensagens
+// (usuário e assistente) e embute a imagem como markdown `![](url)` apontando para
+// o bucket público. Dispensa o LLM de texto e toda a máquina de RAG/contexto.
+
+async function respondWithGeneratedImage(opts: {
+  admin:       ReturnType<typeof createAdminClient>
+  userId:      string
+  userMessage: string
+  prompt:      string
+  sid:         string
+  companyId:   string
+  agentId:     string | null
+}): Promise<Response> {
+  const { admin, userId, userMessage, prompt, sid, companyId, agentId } = opts
+
+  // Persiste a mensagem do usuário (mesmo padrão do fluxo normal, com fallback)
+  {
+    const { error } = await admin.from("messages").insert({
+      session_id: sid, role: "user", content: userMessage, agent_id: null, status: "done",
+    })
+    if (error) {
+      await admin.from("messages").insert({ session_id: sid, role: "user", content: userMessage, agent_id: null })
+    }
+  }
+
+  // Salva a resposta do assistente; faz fallback se colunas extras não existirem
+  async function saveAssistantMsg(content: string, status: "done" | "error", errMsg?: string): Promise<string | null> {
+    const full = {
+      session_id: sid, role: "assistant" as const, content,
+      blocks: { kind: "image", aiMode: "imagem" }, agent_id: agentId,
+      status, error_message: errMsg ?? null, model_used: GEMINI_IMAGE_MODEL, provider: "gemini",
+    }
+    const { data, error } = await admin.from("messages").insert(full).select("id").single()
+    if (!error) return (data?.id as string) ?? null
+    const { data: d2 } = await admin.from("messages").insert({
+      session_id: sid, role: "assistant", content, blocks: { kind: "image" }, agent_id: agentId,
+    }).select("id").single()
+    return (d2?.id as string) ?? null
+  }
+
+  const readable = new ReadableStream({
+    async start(controller) {
+      try {
+        const img     = await generateImage(prompt)
+        const url     = await saveGeneratedImage(img.base64, img.mimeType, `${companyId}/${sid}`)
+        const alt     = prompt.replace(/[[\]]/g, "").slice(0, 80)
+        const caption = img.text || "Aqui está a imagem gerada:"
+        const content = `${caption}\n\n![${alt}](${url})`
+
+        controller.enqueue(sse({ type: "delta", text: content }))
+        const messageId = await saveAssistantMsg(content, "done")
+        controller.enqueue(sse({
+          type: "done", session_id: sid, message_id: messageId, content,
+          model: GEMINI_IMAGE_MODEL, provider: "gemini",
+          usage: { input_tokens: 0, output_tokens: 0 }, error: null,
+        }))
+
+        void logActivity({
+          userId, eventType: "chat", action: "image_generated",
+          detail: prompt.slice(0, 120), sessionId: sid, companyId,
+          metadata: { model: GEMINI_IMAGE_MODEL },
+        })
+      } catch (err: unknown) {
+        const raw      = err instanceof Error ? err.message : "Erro ao gerar imagem"
+        console.error("[chat] image generation failed:", raw.slice(0, 200))
+        const friendly = `⚠️ ${imageErrorMessage(raw)}`
+        controller.enqueue(sse({ type: "error", error: friendly }))
+        const messageId = await saveAssistantMsg(friendly, "error", raw)
+        controller.enqueue(sse({
+          type: "done", session_id: sid, message_id: messageId, content: friendly,
+          model: GEMINI_IMAGE_MODEL, provider: "gemini",
+          usage: { input_tokens: 0, output_tokens: 0 }, error: friendly,
+        }))
+      } finally {
+        controller.close()
+      }
+    },
+  })
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type":      "text/event-stream",
+      "Cache-Control":     "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+      "X-Session-Id":      sid,
+    },
+  })
 }
 
 // ─── Route handler ────────────────────────────────────────────────────────────
@@ -298,6 +391,24 @@ export async function POST(req: NextRequest) {
       } catch (pendingErr) {
         console.warn("[chat] Erro ao vincular fontes pendentes:", pendingErr)
       }
+    }
+  }
+
+  // ─── Geração de imagem (atalho: dispensa LLM de texto, RAG e contexto) ─────────
+  // "/imagem <prompt>" ou linguagem natural ("crie uma imagem de ..."). Intercepta
+  // antes da máquina de contexto, que não se aplica a geração de imagem.
+  if (sid) {
+    const imagePrompt = detectImagePrompt(body.user_message)
+    if (imagePrompt) {
+      return respondWithGeneratedImage({
+        admin,
+        userId:      user.id,
+        userMessage: body.user_message,
+        prompt:      imagePrompt,
+        sid,
+        companyId:   resolvedCompany,
+        agentId:     body.agent_id ?? null,
+      })
     }
   }
 
