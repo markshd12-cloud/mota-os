@@ -5,22 +5,20 @@ import { useParams, useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import {
   ArrowLeft, Bot, Save, Trash2, Plus, X,
-  Building2, FileText, Zap, Settings, Cpu, Loader2,
+  Building2, FileText, Zap, Settings, Loader2,
 } from "lucide-react"
 import type { ApiAgent, ApiAgentFile, ApiAgentCompany } from "@/lib/agent-helpers"
 import { cn } from "@/lib/utils"
 
-type Tab = "geral" | "modelo" | "empresas" | "arquivos" | "capacidades"
+type Tab = "geral" | "empresas" | "arquivos" | "capacidades"
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: "geral",        label: "Geral",       icon: Bot       },
-  { id: "modelo",       label: "Modelo",      icon: Cpu       },
   { id: "empresas",     label: "Empresas",    icon: Building2 },
   { id: "arquivos",     label: "Memória",     icon: FileText  },
   { id: "capacidades",  label: "Capacidades", icon: Zap       },
 ]
 
-const PROVIDERS = ["anthropic", "openai", "gemini"] as const
 const COMPANIES = ["grupo", "cppem", "unicive", "colegio", "everton"] as const
 
 // ─── Main page ────────────────────────────────────────────────────────────────
@@ -78,16 +76,16 @@ export default function AgentDetailPage() {
         </button>
         <div
           className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-          style={{ background: agent.bg_color }}
+          style={{ background: "var(--bg-active)" }}
         >
-          <Bot size={16} style={{ color: agent.color }} />
+          <Bot size={16} className="text-mota-600" />
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-sm font-bold truncate" style={{ color: "var(--text-primary)" }}>
             {agent.name}
           </h1>
           <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-            {agent.slug} · {agent.status}
+            {agent.status}
           </p>
         </div>
         <StatusBadge status={agent.status} />
@@ -125,20 +123,17 @@ export default function AgentDetailPage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(patch),
               })
+              // O "Papel" (role_description) guia o agente → propaga para o system prompt,
+              // já que a aba de modelo foi removida (o chat escolhe o modelo automaticamente).
+              if ("role_description" in patch) {
+                await fetch(`/api/agents/${id}/model-config`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ system_prompt: patch.role_description }),
+                }).catch(() => null)
+              }
               setSaving(false)
               if (res.ok) setAgent(await res.json())
-            }} />
-          )}
-          {tab === "modelo" && (
-            <TabModelo agent={agent} saving={saving} onSave={async (patch) => {
-              setSaving(true)
-              const res = await fetch(`/api/agents/${id}/model-config`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(patch),
-              })
-              setSaving(false)
-              if (res.ok) { const cfg = await res.json(); setAgent(a => a ? { ...a, config: cfg } : a) }
             }} />
           )}
           {tab === "empresas" && (
@@ -200,14 +195,9 @@ function TabGeral({ agent, saving, onSave }: {
 }) {
   const [form, setForm] = useState({
     name:             agent.name,
-    short_name:       agent.short_name,
-    slug:             agent.slug,
     description:      agent.description,
     role_description: agent.role_description ?? "",
     status:           agent.status,
-    icon:             agent.icon,
-    color:            agent.color,
-    bg_color:         agent.bg_color,
     category:         agent.category ?? "",
   })
 
@@ -219,12 +209,6 @@ function TabGeral({ agent, saving, onSave }: {
       className="space-y-4">
       <Row label="Nome">
         <input className={inputCls} value={form.name} onChange={set("name")} required />
-      </Row>
-      <Row label="Nome curto">
-        <input className={inputCls} value={form.short_name} onChange={set("short_name")} />
-      </Row>
-      <Row label="Slug">
-        <input className={inputCls} value={form.slug} onChange={set("slug")} />
       </Row>
       <Row label="Descrição">
         <textarea className={inputCls} rows={2} value={form.description} onChange={set("description")} />
@@ -242,74 +226,6 @@ function TabGeral({ agent, saving, onSave }: {
           <option value="paused">Pausado</option>
           <option value="archived">Arquivado</option>
         </select>
-      </Row>
-      <Row label="Ícone">
-        <input className={inputCls} value={form.icon} onChange={set("icon")} placeholder="Bot" />
-      </Row>
-      <div className="flex gap-4">
-        <Row label="Cor primária">
-          <div className="flex items-center gap-2">
-            <input type="color" value={form.color} onChange={set("color")}
-              className="w-8 h-8 rounded cursor-pointer border-0" style={{ padding: 0 }} />
-            <input className={cn(inputCls, "flex-1")} value={form.color} onChange={set("color")} />
-          </div>
-        </Row>
-        <Row label="Cor de fundo">
-          <div className="flex items-center gap-2">
-            <input type="color" value={form.bg_color.startsWith("rgba") ? "#6366f1" : form.bg_color}
-              onChange={set("bg_color")}
-              className="w-8 h-8 rounded cursor-pointer border-0" style={{ padding: 0 }} />
-            <input className={cn(inputCls, "flex-1")} value={form.bg_color} onChange={set("bg_color")} />
-          </div>
-        </Row>
-      </div>
-      <SaveButton saving={saving} />
-    </form>
-  )
-}
-
-// ─── Tab: Modelo ──────────────────────────────────────────────────────────────
-
-function TabModelo({ agent, saving, onSave }: {
-  agent: ApiAgent
-  saving: boolean
-  onSave: (patch: Record<string, unknown>) => Promise<void>
-}) {
-  const cfg = agent.config
-  const [form, setForm] = useState({
-    provider:      cfg?.provider      ?? "anthropic",
-    model_id:      cfg?.model_id      ?? "claude-sonnet-4-6",
-    temperature:   cfg?.temperature   ?? 0.7,
-    max_tokens:    cfg?.max_tokens    ?? 2048,
-    system_prompt: cfg?.system_prompt ?? "",
-  })
-
-  const set = (k: keyof typeof form) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-      setForm(f => ({ ...f, [k]: k === "temperature" || k === "max_tokens" ? Number(e.target.value) : e.target.value }))
-
-  return (
-    <form onSubmit={(e) => { e.preventDefault(); onSave(form) }} className="space-y-4">
-      <Row label="Provedor">
-        <select className={inputCls} value={form.provider} onChange={set("provider")}>
-          {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
-        </select>
-      </Row>
-      <Row label="Model ID">
-        <input className={inputCls} value={form.model_id} onChange={set("model_id")}
-          placeholder="claude-sonnet-4-6" />
-      </Row>
-      <Row label={`Temperatura (${form.temperature})`}>
-        <input type="range" min={0} max={1} step={0.05} value={form.temperature} onChange={set("temperature")}
-          className="w-full accent-mota-600" />
-      </Row>
-      <Row label="Max tokens">
-        <input type="number" className={inputCls} value={form.max_tokens} onChange={set("max_tokens")}
-          min={256} max={32000} step={256} />
-      </Row>
-      <Row label="System prompt">
-        <textarea className={inputCls} rows={10} value={form.system_prompt} onChange={set("system_prompt")}
-          placeholder="Você é um assistente de IA especializado em..." />
       </Row>
       <SaveButton saving={saving} />
     </form>

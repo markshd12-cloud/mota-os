@@ -21,19 +21,9 @@ export default function NewAgentPage() {
 
   const [form, setForm] = useState({
     name:             "",
-    short_name:       "",
-    slug:             "",
     description:      "",
     role_description: "",
     category:         "",
-    icon:             "Bot",
-    color:            "#6366f1",
-    bg_color:         "rgba(99,102,241,0.12)",
-    provider:         "anthropic",
-    model_id:         "claude-sonnet-4-6",
-    temperature:      0.7,
-    max_tokens:       4000,
-    system_prompt:    "",
   })
 
   const [saving, setSaving] = useState(false)
@@ -60,22 +50,7 @@ export default function NewAgentPage() {
   const set =
     (k: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-      const val = k === "temperature" || k === "max_tokens" ? Number(e.target.value) : e.target.value
-      setForm((f) => {
-        const next = { ...f, [k]: val }
-        // Auto-fill slug from name
-        if (k === "name") {
-          next.slug = (e.target.value as string)
-            .toLowerCase()
-            .trim()
-            .replace(/\s+/g, "-")
-            .replace(/[^a-z0-9-]/g, "")
-          if (!f.short_name || f.short_name === f.name) {
-            next.short_name = e.target.value as string
-          }
-        }
-        return next
-      })
+      setForm((f) => ({ ...f, [k]: e.target.value }))
     }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -90,8 +65,15 @@ export default function NewAgentPage() {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...form,
-          company_id: currentCompany?.slug ?? null,
+          name:             form.name,
+          description:      form.description,
+          role_description: form.role_description,
+          category:         form.category,
+          // O "Papel" é o que define o comportamento do agente → vira o system prompt.
+          // Modelo/provedor ficam com o default do backend; o chat (modo jarvis)
+          // escolhe automaticamente o melhor modelo por prompt em runtime.
+          system_prompt:    form.role_description,
+          company_id:       currentCompany?.slug ?? null,
         }),
       })
 
@@ -153,9 +135,9 @@ export default function NewAgentPage() {
         </button>
         <div
           className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-          style={{ background: form.bg_color }}
+          style={{ background: "var(--bg-active)" }}
         >
-          <Bot size={16} style={{ color: form.color }} />
+          <Bot size={16} className="text-mota-600" />
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-sm font-bold" style={{ color: "var(--text-primary)" }}>
@@ -187,14 +169,6 @@ export default function NewAgentPage() {
               <input className={inputCls} value={form.name} onChange={set("name")} required
                 placeholder="ex: Agente de Marketing" autoFocus />
             </Row>
-            <Row label="Nome curto">
-              <input className={inputCls} value={form.short_name} onChange={set("short_name")}
-                placeholder="ex: Marketing" />
-            </Row>
-            <Row label="Slug (URL)">
-              <input className={inputCls} value={form.slug} onChange={set("slug")}
-                placeholder="ex: marketing" pattern="[a-z0-9-]+" />
-            </Row>
             <Row label="Categoria">
               <input className={inputCls} value={form.category} onChange={set("category")}
                 placeholder="ex: Marketing, Suporte, Vendas" />
@@ -210,55 +184,6 @@ export default function NewAgentPage() {
             <Row label="Papel (system prompt base)">
               <textarea className={inputCls} rows={5} value={form.role_description} onChange={set("role_description")}
                 placeholder="Descreva o papel, tom, restrições e comportamento esperado deste agente..." />
-            </Row>
-          </Section>
-
-          {/* ── Seção: Visual ── */}
-          <Section title="Visual">
-            <Row label="Ícone (nome Lucide)">
-              <input className={inputCls} value={form.icon} onChange={set("icon")}
-                placeholder="Bot" />
-            </Row>
-            <div className="grid grid-cols-2 gap-4">
-              <Row label="Cor primária">
-                <div className="flex items-center gap-2">
-                  <input type="color" value={form.color} onChange={set("color")}
-                    className="w-8 h-8 rounded cursor-pointer border-0 p-0 shrink-0" />
-                  <input className={cn(inputCls, "flex-1")} value={form.color} onChange={set("color")} />
-                </div>
-              </Row>
-              <Row label="Cor de fundo">
-                <input className={inputCls} value={form.bg_color} onChange={set("bg_color")}
-                  placeholder="rgba(99,102,241,0.12)" />
-              </Row>
-            </div>
-          </Section>
-
-          {/* ── Seção: Modelo ── */}
-          <Section title="Configuração de modelo">
-            <Row label="Provedor">
-              <select className={inputCls} value={form.provider} onChange={set("provider")}>
-                <option value="anthropic">Anthropic</option>
-                <option value="openai">OpenAI</option>
-                <option value="gemini">Gemini</option>
-              </select>
-            </Row>
-            <Row label="Model ID">
-              <input className={inputCls} value={form.model_id} onChange={set("model_id")}
-                placeholder="claude-sonnet-4-6" />
-            </Row>
-            <Row label={`Temperatura (${form.temperature})`}>
-              <input type="range" min={0} max={1} step={0.05}
-                value={form.temperature} onChange={set("temperature")}
-                className="w-full accent-mota-600" />
-            </Row>
-            <Row label="Max tokens">
-              <input type="number" className={inputCls} value={form.max_tokens} onChange={set("max_tokens")}
-                min={256} max={32000} step={256} />
-            </Row>
-            <Row label="System prompt (opcional — gerado automaticamente se vazio)">
-              <textarea className={inputCls} rows={4} value={form.system_prompt} onChange={set("system_prompt")}
-                placeholder="Deixe em branco para gerar a partir do nome e descrição." />
             </Row>
           </Section>
 
