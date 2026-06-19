@@ -8,6 +8,7 @@ import { Sidebar } from "./Sidebar";
 import { CompanyProvider } from "@/components/providers/CompanyProvider";
 import { Toaster } from "sonner";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
+import { ReminderAlarm } from "@/components/ReminderAlarm";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 function useSessionPing() {
@@ -123,6 +124,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </div>
+
+      {/* Alarme de lembretes — modal central + som, sobre qualquer página */}
+      <ReminderAlarm />
 
       <Toaster
         position="bottom-right"

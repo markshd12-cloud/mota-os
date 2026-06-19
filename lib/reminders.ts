@@ -17,8 +17,16 @@ export interface ReminderSpec {
 
 // ─── Detecção de intenção ───────────────────────────────────────────────────────
 
-const CREATE_RE =
-  /^\s*(\/lembrete\b|\/lembrar\b|me\s+lembr|lembr[ae]-me|cria\w*\s+(um\s+)?lembrete|agend\w*\s+(um\s+)?lembrete)/i
+// Comando explícito (no início da mensagem).
+const CMD_RE = /^\s*\/(lembrete|lembrar)\b/i
+
+// Frase de lembrete em qualquer posição (a hora pode vir antes: "em 7 min me lembre…").
+const NL_REMINDER_RE =
+  /(me\s+lembr|lembr[ae][\s-]+me|lembre\s+de|cria\w*\s+(um\s+)?lembrete|agend\w*\s+(um\s+)?lembrete)/i
+
+// Indício de tempo — evita falso positivo em "isso me lembra de quando…".
+const TIME_HINT_RE =
+  /([àa]s?\s*\d{1,2}([:h]\d{0,2})?|\bem\s+\d+\s*(min|minuto|hora|\bh\b)|daqui\s+a\s+\d|todo[s]?\s+(o\s+dia|os\s+dias|dia)|amanh[ãa]|toda[s]?\s+(segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo)|\bhoje\b|\d{1,2}h\b)/i
 
 const CANCEL_RE =
   /(parar?\s+de\s+(me\s+)?lembrar|cancel\w*\s+(o\s+)?lembrete|remov\w*\s+(o\s+)?lembrete|n[ãa]o\s+me\s+lembre\s+mais|desativ\w*\s+(o\s+)?lembrete)/i
@@ -28,7 +36,9 @@ export function isReminderCreate(text: string): boolean {
   if (!t) return false
   // Cancelamento tem prioridade (evita "não me lembre mais" cair em create)
   if (CANCEL_RE.test(t)) return false
-  return CREATE_RE.test(t)
+  if (CMD_RE.test(t)) return true
+  // Linguagem natural exige uma frase de lembrete + um indício de tempo.
+  return NL_REMINDER_RE.test(t) && TIME_HINT_RE.test(t)
 }
 
 export function isReminderCancel(text: string): boolean {
@@ -43,12 +53,18 @@ export const REMINDER_EXTRACTION_SYSTEM =
   `{"content": string, "time_of_day": "HH:MM", "recurrence": "daily"|"weekly"|"once", "days_of_week": number[]|null}\n` +
   "Regras: time_of_day em 24h (ex: 14:35). 'todos os dias' => daily. " +
   "Dias específicos (ex: segundas) => weekly com days_of_week (0=domingo..6=sábado). " +
-  "Sem repetição (ex: 'amanhã') => once. days_of_week null exceto para weekly. " +
-  "content é só o texto a lembrar, sem o pedido de agendamento. " +
-  "Se não houver horário explícito, use \"09:00\"."
+  "Sem repetição ('amanhã', 'hoje', um horário único) => once. days_of_week null exceto para weekly. " +
+  "TEMPO RELATIVO ('em N minutos', 'daqui a N horas'): some N ao HORÁRIO ATUAL informado e " +
+  "devolva o horário absoluto resultante (HH:MM), com recurrence 'once'. " +
+  "content é só o texto a lembrar, sem o pedido de agendamento (sem 'me lembre', sem 'em 7 minutos'). " +
+  "Se realmente não houver horário, use \"09:00\"."
 
 export function buildExtractionUser(message: string): string {
-  return `Mensagem: """${message.slice(0, 2000)}"""\nResponda só o JSON.`
+  const now = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Recife", weekday: "long",
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).format(new Date())
+  return `Horário atual (America/Recife): ${now}.\nMensagem: """${message.slice(0, 2000)}"""\nResponda só o JSON.`
 }
 
 /** Faz parse + validação do JSON devolvido pela IA. Retorna null se inválido. */
