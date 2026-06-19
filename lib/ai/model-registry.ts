@@ -48,7 +48,7 @@ const MODE_TO_PROVIDER: Record<
 };
 
 /** Verifica se o provider do modo está configurado. */
-function isProviderConfigured(provider: string): boolean {
+export function isProviderConfigured(provider: string): boolean {
   switch (provider) {
     case "anthropic":
       // API key estática OU Auth0 WIF (sem arquivo — token buscado dinamicamente)
@@ -89,7 +89,18 @@ export function resolveAIMode(
   | { provider: string; model: string; routedByJarvis: boolean }
   | { error: string } {
   if (mode === "jarvis") {
-    // Modo automático — roteamento padrão do sistema
+    // Modo automático. O provedor primário é configurável via
+    // JARVIS_DEFAULT_PROVIDER (claude|gemini|chatgpt|deepseek) — útil para
+    // priorizar uma IA com saldo. Se não definido/indisponível, cai no Claude.
+    // Em qualquer caso, o fallback automático (streamChatWithFallback) cobre
+    // a falha do primário trocando para outro provedor em runtime.
+    const pref = (process.env.JARVIS_DEFAULT_PROVIDER ?? "claude").toLowerCase();
+    const chosen =
+      isAIMode(pref) && pref !== "jarvis" ? MODE_TO_PROVIDER[pref] : null;
+
+    if (chosen && isProviderConfigured(chosen.provider)) {
+      return { provider: chosen.provider, model: chosen.model, routedByJarvis: true };
+    }
     return {
       provider: "anthropic",
       model: "claude-sonnet-4-6",

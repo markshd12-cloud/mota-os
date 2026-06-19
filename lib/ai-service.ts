@@ -11,6 +11,7 @@ import { getValidGeminiToken }    from "@/lib/gemini-auth"
 import { getServiceAccountToken } from "@/lib/gemini-service-account"
 import { createGeminiClient, type GeminiContent, type GeminiModel } from "@/lib/api-connectors/gemini"
 import { ensureAnthropicCredentials } from "@/lib/anthropic-auth"
+import { isProviderConfigured }       from "@/lib/ai/model-registry"
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -219,6 +220,66 @@ export async function* streamChat(params: AIStreamParams): AsyncGenerator<AIChun
     }
   } catch (err: unknown) {
     yield { done: true, text: "", error: friendlyAIError(provider, err) }
+  }
+}
+
+// ─── Fallback automático entre provedores ───────────────────────────────────────
+// Tenta o provedor primário; se ele falhar por cota/limite/sobrecarga/instabilidade
+// ANTES de gerar qualquer texto, troca para o próximo provedor configurado, de forma
+// transparente. O chunk `done` final carrega o provedor que de fato respondeu, então
+// a UI mostra corretamente qual IA gerou a resposta.
+
+const FALLBACK_PREFERENCE: AIProvider[] = ["gemini", "anthropic", "openai", "deepseek"]
+
+const FALLBACK_MODEL: Record<AIProvider, string> = {
+  anthropic: "claude-sonnet-4-6",
+  gemini:    "gemini-2.5-flash",
+  openai:    "gpt-4o",
+  deepseek:  "deepseek-chat",
+}
+
+/** Erros em que vale tentar outro provedor (disponibilidade/recurso, não conteúdo). */
+function isFallbackWorthy(errorText: string): boolean {
+  return /cr[ée]dito|cota|limite de uso|sobrecarregad|inst[aá]vel|autentica[çc]|overload|rate.?limit|credit balance|\b429\b|\b5\d\d\b/i.test(errorText)
+}
+
+export async function* streamChatWithFallback(params: AIStreamParams): AsyncGenerator<AIChunk> {
+  const primary = params.provider ?? "anthropic"
+
+  // Ordem de tentativa: primário, depois preferências — sem repetir, só configurados.
+  const order: AIProvider[] = []
+  for (const p of [primary, ...FALLBACK_PREFERENCE]) {
+    if (!order.includes(p) && isProviderConfigured(p)) order.push(p)
+  }
+  if (order.length === 0) order.push(primary)
+
+  for (let i = 0; i < order.length; i++) {
+    const provider = order[i]
+    const isLast   = i === order.length - 1
+    const model    = provider === primary ? params.model : FALLBACK_MODEL[provider]
+
+    let producedText = false
+    let errorChunk: AIChunkError | null = null
+
+    for await (const chunk of streamChat({ ...params, provider, model })) {
+      if (chunk.done && "error" in chunk) {
+        errorChunk = chunk
+        break
+      }
+      if (!chunk.done && chunk.text) producedText = true
+      yield chunk
+      if (chunk.done) return  // sucesso — encerra
+    }
+
+    if (!errorChunk) return  // defensivo: terminou sem erro nem done
+
+    // Só troca de provedor se nada foi gerado ainda, há próximo, e o erro é de recurso.
+    const canFallback = !producedText && !isLast && isFallbackWorthy(errorChunk.error)
+    if (!canFallback) {
+      yield errorChunk
+      return
+    }
+    console.warn(`[ai-service] ${provider} indisponível ("${errorChunk.error.slice(0, 80)}") → fallback para ${order[i + 1]}`)
   }
 }
 

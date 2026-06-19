@@ -1,7 +1,7 @@
 ﻿import { NextRequest } from "next/server"
 import { createClient }      from "@/lib/supabase-server"
 import { createAdminClient } from "@/lib/supabase-admin"
-import { streamChat, type AIProvider } from "@/lib/ai-service"
+import { streamChatWithFallback, type AIProvider } from "@/lib/ai-service"
 import { logActivity }                 from "@/lib/activity-logger"
 import { embedText }                   from "@/lib/rag/embeddings"
 import { rateLimit, RATE_LIMITS, rateLimitSseResponse, isBodyTooLarge, BODY_LIMITS } from "@/lib/rate-limit"
@@ -883,7 +883,7 @@ export async function POST(req: NextRequest) {
       const systemWithDirective = (system ? `${system}\n\n` : "") + institutionalDirective
 
       try {
-        for await (const chunk of streamChat({ messages: safeMessages, system: systemWithDirective, provider, model })) {
+        for await (const chunk of streamChatWithFallback({ messages: safeMessages, system: systemWithDirective, provider, model })) {
 
           if (!chunk.done) {
             // Delta parcial
