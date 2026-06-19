@@ -145,6 +145,27 @@ export function resolveChannel(watcher: WatcherForNotify): string {
   return watcher.notification_channel || 'dashboard'
 }
 
+/**
+ * Envia uma mensagem ao destino Rocket.Chat padrão da empresa (ou global).
+ * Reutiliza a resolução de destino e o envio (webhook/REST) dos vigias.
+ * Nunca lança — devolve { sent, error }.
+ */
+export async function sendRocketChatMessage(
+  admin:     SupabaseClient,
+  companyId: string | null,
+  message:   string,
+): Promise<{ sent: boolean; destination_id?: string; error?: string }> {
+  const dest = await resolveWatcherDest(admin, companyId)
+  if (!dest) return { sent: false, error: 'Nenhum destino Rocket.Chat configurado.' }
+  try {
+    if (dest.mode === 'webhook') await sendWebhook(dest, message)
+    else                         await sendRest(dest, message)
+    return { sent: true, destination_id: dest.id }
+  } catch (e) {
+    return { sent: false, destination_id: dest.id, error: e instanceof Error ? e.message : 'Erro ao enviar' }
+  }
+}
+
 export async function notifyWatcher(
   admin:   SupabaseClient,
   watcher: WatcherForNotify,

@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   MessageSquare,
+  Bell,
   Bookmark,
   Tag,
   Archive,
@@ -61,6 +62,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userInitial, setUserInitial] = useState("U");
   const [unreadNews, setUnreadNews] = useState(0);
+  const [unreadNotifs, setUnreadNotifs] = useState(0);
   const [counts, setCounts] = useState<{ projects: number; agents: number }>({ projects: 0, agents: 0 });
 
   const isCollapsed = collapsed && !isHovered;
@@ -111,6 +113,21 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     fetchUnread();
     window.addEventListener("announcements-read", fetchUnread);
     return () => window.removeEventListener("announcements-read", fetchUnread);
+  }, []);
+
+  useEffect(() => {
+    function fetchNotifs() {
+      fetch("/api/notifications")
+        .then(r => (r.ok ? r.json() : { unread: 0 }))
+        .then((data: { unread?: number }) =>
+          setUnreadNotifs(typeof data.unread === "number" ? data.unread : 0),
+        )
+        .catch(() => {});
+    }
+    fetchNotifs();
+    window.addEventListener("notifications-read", fetchNotifs);
+    const t = setInterval(fetchNotifs, 60_000); // atualiza o badge se um lembrete disparar com o app aberto
+    return () => { window.removeEventListener("notifications-read", fetchNotifs); clearInterval(t); };
   }, []);
 
   useEffect(() => {
@@ -274,6 +291,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
         {(
           [
+            {
+              label: "Avisos",
+              href: "/notifications",
+              icon: Bell,
+              badge: unreadNotifs > 0 ? unreadNotifs : undefined,
+            },
             {
               label: "Novidades",
               href: "/changelog",

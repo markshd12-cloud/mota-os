@@ -11,6 +11,9 @@ import { resolveAIMode, isAIMode, modelLabel } from "@/lib/ai/model-registry"
 import { detectImagePrompt } from "@/lib/ai/detect-image-request"
 import { generateImage, imageErrorMessage, GEMINI_IMAGE_MODEL } from "@/lib/ai/generate-image"
 import { saveGeneratedImage } from "@/lib/storage/generated-images"
+import { isReminderCreate, isReminderCancel, parseReminderSpec, computeNextRunAt,
+         REMINDER_EXTRACTION_SYSTEM, buildExtractionUser, type ReminderSpec } from "@/lib/reminders"
+import { completeGemini } from "@/lib/ai/complete-gemini"
 
 export const dynamic = "force-dynamic"
 
@@ -97,6 +100,119 @@ async function respondWithGeneratedImage(opts: {
       } finally {
         controller.close()
       }
+    },
+  })
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type":      "text/event-stream",
+      "Cache-Control":     "no-cache, no-transform",
+      "X-Accel-Buffering": "no",
+      "X-Session-Id":      sid,
+    },
+  })
+}
+
+// ─── Lembretes (criar / cancelar) ──────────────────────────────────────────────
+
+const WEEKDAY_PT = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"]
+
+function scheduleLabel(spec: ReminderSpec, nextRun: Date, tz: string): string {
+  const t = spec.time_of_day
+  if (spec.recurrence === "daily") return `todos os dias às ${t}`
+  if (spec.recurrence === "weekly") {
+    const dias = (spec.days_of_week ?? []).map(d => WEEKDAY_PT[d]).join(", ")
+    return dias ? `toda ${dias} às ${t}` : `semanalmente às ${t}`
+  }
+  const data = nextRun.toLocaleString("pt-BR", { timeZone: tz, day: "2-digit", month: "2-digit" })
+  return `uma vez, em ${data} às ${t}`
+}
+
+async function respondWithReminder(opts: {
+  admin:       ReturnType<typeof createAdminClient>
+  userId:      string
+  userMessage: string
+  sid:         string
+  companyId:   string
+  agentId:     string | null
+  mode:        "create" | "cancel"
+}): Promise<Response> {
+  const { admin, userId, userMessage, sid, companyId, agentId, mode } = opts
+  const TZ = "America/Recife"
+
+  // Persiste a mensagem do usuário (mesmo padrão do fluxo normal, com fallback)
+  {
+    const { error } = await admin.from("messages").insert({
+      session_id: sid, role: "user", content: userMessage, agent_id: null, status: "done",
+    })
+    if (error) await admin.from("messages").insert({ session_id: sid, role: "user", content: userMessage, agent_id: null })
+  }
+
+  async function saveAssistantMsg(content: string): Promise<string | null> {
+    const full = {
+      session_id: sid, role: "assistant" as const, content,
+      blocks: { kind: "reminder", aiMode: "lembrete" }, agent_id: agentId,
+      status: "done", model_used: "reminder", provider: "system",
+    }
+    const { data, error } = await admin.from("messages").insert(full).select("id").single()
+    if (!error) return (data?.id as string) ?? null
+    const { data: d2 } = await admin.from("messages").insert({
+      session_id: sid, role: "assistant", content, blocks: { kind: "reminder" }, agent_id: agentId,
+    }).select("id").single()
+    return (d2?.id as string) ?? null
+  }
+
+  const readable = new ReadableStream({
+    async start(controller) {
+      let content: string
+      try {
+        if (mode === "cancel") {
+          const { data: actives } = await admin.from("reminders").select("id").eq("user_id", userId).eq("active", true)
+          const ids = (actives ?? []).map(a => a.id as string)
+          if (ids.length === 0) {
+            content = "Você não tem lembretes ativos no momento."
+          } else {
+            await admin.from("reminders").update({ active: false }).in("id", ids)
+            content = `🗑️ Pronto — desativei ${ids.length} lembrete${ids.length > 1 ? "s" : ""}.`
+          }
+        } else {
+          // Extrai o lembrete via Gemini (não depende do Claude/saldo)
+          let raw = ""
+          try { raw = await completeGemini(REMINDER_EXTRACTION_SYSTEM, buildExtractionUser(userMessage)) } catch { /* trata abaixo */ }
+          const spec = parseReminderSpec(raw)
+          if (!spec) {
+            content = 'Não consegui entender o horário do lembrete. Tente algo como: "me lembre todo dia às 14h de revisar a pauta".'
+          } else {
+            const next = computeNextRunAt(
+              { time_of_day: spec.time_of_day, recurrence: spec.recurrence, days_of_week: spec.days_of_week, timezone: TZ },
+            )
+            if (!next) {
+              content = "Não consegui calcular o próximo horário desse lembrete. Tente reformular."
+            } else {
+              const { error: insErr } = await admin.from("reminders").insert({
+                user_id: userId, company_id: companyId, content: spec.content,
+                time_of_day: spec.time_of_day, timezone: TZ, recurrence: spec.recurrence,
+                days_of_week: spec.days_of_week, next_run_at: next.toISOString(),
+                active: true, channels: ["inapp", "rocketchat"],
+              })
+              content = insErr
+                ? "Não consegui salvar o lembrete agora. Tente novamente."
+                : `✅ Lembrete criado — ${scheduleLabel(spec, next, TZ)}:\n\n"${spec.content}"\n\nVou te avisar aqui e no Rocket.Chat. Para parar, diga "pare de me lembrar".`
+            }
+          }
+        }
+      } catch {
+        content = "⚠️ Não consegui processar o lembrete agora. Tente novamente."
+      }
+
+      controller.enqueue(sse({ type: "delta", text: content }))
+      const messageId = await saveAssistantMsg(content)
+      controller.enqueue(sse({
+        type: "done", session_id: sid, message_id: messageId, content,
+        model: "reminder", provider: "system",
+        usage: { input_tokens: 0, output_tokens: 0 }, error: null,
+      }))
+      controller.close()
     },
   })
 
@@ -409,6 +525,18 @@ export async function POST(req: NextRequest) {
         companyId:   resolvedCompany,
         agentId:     body.agent_id ?? null,
       })
+    }
+  }
+
+  // ─── Lembretes (criar / cancelar) — atalho que dispensa RAG e LLM de chat ──────
+  if (sid) {
+    const common = { admin, userId: user.id, userMessage: body.user_message, sid,
+                     companyId: resolvedCompany, agentId: body.agent_id ?? null }
+    if (isReminderCancel(body.user_message)) {
+      return respondWithReminder({ ...common, mode: "cancel" })
+    }
+    if (isReminderCreate(body.user_message)) {
+      return respondWithReminder({ ...common, mode: "create" })
     }
   }
 
