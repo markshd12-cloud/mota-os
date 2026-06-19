@@ -377,32 +377,3 @@ export interface ApiResponse<T> {
   status: number
 }
 
-// ─── Dashboard (retorno de get_dashboard_stats RPC) ──────────────────────────
-
-export interface DashboardDayCount {
-  date:  string   // "DD/MM"
-  count: number
-}
-
-export interface DashboardAgentUsage {
-  agent_id: UUID
-  name:     string
-  color:    HexColor
-  count:    number
-}
-
-export interface DashboardStats {
-  total_sessions:     number
-  sessions_today:     number
-  sessions_this_week: number
-  total_messages:     number
-  messages_today:     number
-  tasks_open:         number
-  tasks_done:         number
-  tasks_total:        number
-  workflows_active:   number
-  workflow_runs_week: number
-  agents_active:      number
-  sessions_by_day:    DashboardDayCount[]
-  top_agents:         DashboardAgentUsage[]
-}

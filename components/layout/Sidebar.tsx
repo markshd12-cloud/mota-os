@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  LayoutDashboard,
   MessageSquare,
   Bookmark,
   Tag,
@@ -41,12 +40,6 @@ interface NavItem {
 }
 
 const ALL_NAV_ITEMS: NavItem[] = [
-  {
-    label: "Dashboard",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-    adminOnly: true,
-  },
   { label: "Chat", href: "/chat", icon: MessageSquare },
   { label: "Projetos", href: "/projects", icon: FolderOpen },
   { label: "Fontes", icon: Database, href: "/sources" },

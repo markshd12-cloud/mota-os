@@ -13,7 +13,7 @@ export async function GET(request: Request) {
 
     const code = url.searchParams.get("code");
     const type = url.searchParams.get("type");
-    const next = url.searchParams.get("next") ?? "/dashboard";
+    const next = url.searchParams.get("next") ?? "/chat";
 
     console.log("code:", code);
     console.log("type:", type);

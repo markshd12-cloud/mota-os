@@ -42,20 +42,7 @@ export default function LoginPage() {
         )
         return
       }
-      // Destino conforme o papel: admin → /dashboard, demais → /chat.
-      // Navegar direto evita passar por /dashboard (que o middleware redireciona
-      // para /chat), eliminando a navegação dupla que causava reload na página.
-      let dest = "/chat"
-      try {
-        const res = await fetch("/api/profile")
-        if (res.ok) {
-          const profile = await res.json() as { role?: string }
-          if (profile.role === "admin") dest = "/dashboard"
-        }
-      } catch {
-        /* mantém /chat como fallback seguro */
-      }
-      router.push(dest)
+      router.push("/chat")
       router.refresh()
     } catch {
       setError("Erro de conexão. Verifique sua internet e tente novamente.")

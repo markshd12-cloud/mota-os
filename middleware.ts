@@ -92,11 +92,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Usuário logado em /login → dashboard
+  // Usuário logado em /login → chat
   // /auth/* NÃO está aqui: o /auth/callback deve rodar para todos (PKCE exchange)
   if (user && isLoginRoute) {
     const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
+    url.pathname = "/chat";
     return NextResponse.redirect(url);
   }
 
@@ -113,21 +113,6 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/change-password";
     return NextResponse.redirect(url);
-  }
-
-  const isDashboardRoute =
-    pathname === "/dashboard" || pathname.startsWith("/dashboard/");
-  if (user && isDashboardRoute) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-    if (profile?.role !== "admin") {
-      const url = request.nextUrl.clone();
-      url.pathname = "/chat";
-      return NextResponse.redirect(url);
-    }
   }
 
   return supabaseResponse;

@@ -56,7 +56,7 @@ export default function ChangePasswordPage() {
     await supabase.auth.refreshSession()
 
     setSuccess(true)
-    setTimeout(() => router.push("/dashboard"), 1500)
+    setTimeout(() => router.push("/chat"), 1500)
   }
 
   const inputCls   = "w-full rounded-lg px-3 py-2 text-sm outline-none transition-colors"
