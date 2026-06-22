@@ -8,7 +8,6 @@ import {
   Users,
   Brain,
   KeyRound,
-  Database,
   Palette,
   Shield,
   ShieldOff,
@@ -46,7 +45,6 @@ type SettingsTab =
   | "users"
   | "models"
   | "apis"
-  | "supabase"
   | "appearance"
   | "security"
   | "logs";
@@ -62,7 +60,6 @@ const settingsTabs: {
   { id: "users", label: "Usuários", icon: Users, adminOnly: true },
   { id: "models", label: "Modelos de IA", icon: Brain, adminOnly: true },
   { id: "apis", label: "APIs", icon: KeyRound, adminOnly: true },
-  { id: "supabase", label: "Supabase", icon: Database, adminOnly: true },
   { id: "appearance", label: "Aparência", icon: Palette },
   { id: "security", label: "Segurança", icon: ShieldCheck },
   { id: "logs", label: "Logs", icon: ScrollText, adminOnly: true },
@@ -123,7 +120,6 @@ function SettingsPageContent() {
             {activeTab === "users" && <UsersTab />}
             {activeTab === "models" && <ModelsTab />}
             {activeTab === "apis" && <ApisTab />}
-            {activeTab === "supabase" && <SupabaseTab />}
             {activeTab === "appearance" && <AppearanceTab />}
             {activeTab === "security" && <SecurityTab />}
             {activeTab === "logs" && <LogsTab />}
@@ -3180,13 +3176,6 @@ const APIS_CONFIG: Array<{
     ],
   },
   {
-    id: "supabase",
-    label: "Supabase",
-    color: "#3ecf8e",
-    pending: false,
-    fields: [],
-  },
-  {
     id: "rocketchat",
     label: "Rocket.Chat",
     color: "#f5455c",
@@ -3802,37 +3791,6 @@ function ApisTab() {
                   style={{ borderColor: "var(--border-color)" }}
                 >
                   <div className="pt-4 space-y-3">
-                    {/* Supabase: caso especial — env vars */}
-                    {def.id === "supabase" && (
-                      <div
-                        className="flex items-start gap-2 p-3 rounded-xl text-[11px]"
-                        style={{
-                          background: "rgba(62,207,142,0.06)",
-                          border: "1px solid rgba(62,207,142,0.2)",
-                          color: "var(--text-secondary)",
-                        }}
-                      >
-                        <Database
-                          size={13}
-                          className="mt-0.5 shrink-0"
-                          style={{ color: "#3ecf8e" }}
-                        />
-                        <span>
-                          As credenciais do Supabase são lidas via variáveis de
-                          ambiente (
-                          <code className="font-mono">
-                            NEXT_PUBLIC_SUPABASE_URL
-                          </code>{" "}
-                          e{" "}
-                          <code className="font-mono">
-                            SUPABASE_SERVICE_ROLE_KEY
-                          </code>
-                          ), não via configuração manual. Clique em Testar para
-                          verificar a conectividade.
-                        </span>
-                      </div>
-                    )}
-
                     {/* Rocket.Chat: seletor de modo + campos condicionais + destinos */}
                     {def.id === "rocketchat" && (
                       <>
@@ -4029,65 +3987,6 @@ function ApisTab() {
             </div>
           );
         })}
-      </div>
-    </div>
-  );
-}
-
-/* ─── Supabase ─── */
-function SupabaseTab() {
-  return (
-    <div className="space-y-5">
-      <SectionTitle>Conexão Supabase</SectionTitle>
-      <div
-        className="flex items-start gap-3 p-4 rounded-xl border"
-        style={{
-          background: "rgba(59,130,246,0.06)",
-          borderColor: "rgba(59,130,246,0.2)",
-        }}
-      >
-        <Database size={15} className="text-blue-400 shrink-0 mt-0.5" />
-        <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-          Configure a conexão com seu projeto Supabase. As credenciais são
-          usadas para persistir sessões, agentes, tarefas e automações.
-        </p>
-      </div>
-
-      <div className="space-y-4">
-        <Field label="URL do projeto" hint="Exemplo: https://xxxx.supabase.co">
-          <Input placeholder="https://seu-projeto.supabase.co" />
-        </Field>
-        <Field
-          label="Chave anônima (anon key)"
-          hint="Chave pública — segura para uso no cliente."
-        >
-          <Input placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." />
-        </Field>
-        <Field
-          label="Chave de serviço (service_role)"
-          hint="Chave privada — nunca exponha ao cliente."
-        >
-          <Input
-            type="password"
-            placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-          />
-        </Field>
-        <Field label="Schema padrão">
-          <Input defaultValue="public" />
-        </Field>
-      </div>
-
-      <div className="flex items-center justify-between pt-2">
-        <button
-          className="text-xs px-4 py-2 rounded-xl border transition-colors hover:bg-[var(--bg-hover)]"
-          style={{
-            borderColor: "var(--border-color)",
-            color: "var(--text-secondary)",
-          }}
-        >
-          Testar conexão
-        </button>
-        <SaveButton label="Salvar credenciais" />
       </div>
     </div>
   );

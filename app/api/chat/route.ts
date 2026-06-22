@@ -710,7 +710,10 @@ export async function POST(req: NextRequest) {
             filter_companies:  companyScope,
             filter_agent_id:   null,
             filter_source_ids: nonSessionIndexed.map(s => s.id),
-            min_similarity:    0.5,
+            // gemini-embedding-001 tem piso de similaridade alto (~0.55 mesmo para
+            // texto sem relação), então 0.5 casava com qualquer pergunta. 0.65 só
+            // anexa fontes de fato relevantes (relevantes medem 0.67+).
+            min_similarity:    0.65,
           })
 
           if (autoChunks && autoChunks.length > 0) {
@@ -724,9 +727,9 @@ export async function POST(req: NextRequest) {
 
             const autoParts = chunkList.map(c => `[${c.title ?? c.source_type ?? "Auto"}]\n${c.content}`)
             system = (system ?? "")
-              + `\n\nFONTES ADICIONAIS DETECTADAS AUTOMATICAMENTE (${detectedNames.join(", ")}):\n`
+              + `\n\nFONTES POSSIVELMENTE RELEVANTES (${detectedNames.join(", ")}):\n`
               + autoParts.join("\n\n---\n\n")
-              + `\n\nInstrução ao assistente: mencione explicitamente ao usuário que as seguintes fontes foram identificadas automaticamente como relevantes e usadas nesta resposta: ${detectedNames.join(", ")}.\n`
+              + `\n\nUse o conteúdo acima apenas se ajudar a responder a pergunta. Não anuncie nem cite fontes que não embasaram a sua resposta.\n`
 
             void logActivity({
               userId: user.id, eventType: "source", action: "chat_auto_detected",
@@ -827,7 +830,9 @@ export async function POST(req: NextRequest) {
             filter_companies:  companyScope,
             filter_agent_id:   null,
             filter_source_ids: null,
-            min_similarity:    0.35,
+            // Mesmo piso alto do embedding (ver auto-detecção): 0.35 trazia ruído
+            // em toda busca. 0.6 mantém recall do roteador, sem lixo.
+            min_similarity:    0.6,
           })
           if (chunks && chunks.length > 0) {
             const kbChunks = chunks as { title?: string | null; content: string }[]
